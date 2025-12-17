@@ -74,20 +74,29 @@ func (ec *ethClient) GetLatestBlock(ctx context.Context) (int64, error) {
 // returned from the callback function.
 func (ec *ethClient) ListenToBlocks(ctx context.Context, reconnectInterval time.Duration, cb func(int64) error) error {
 	headers := make(chan *types.Header)
+	ec.logger.Debug("Creating initial subscription to new blocks")
 	sub, err := ec.client.SubscribeNewHead(ctx, headers)
 	if err != nil {
+		ec.logger.Error("Failed to create initial subscription", "error", err)
 		return err
 	}
+	ec.logger.Debug("Initial subscription created successfully")
 
 	resubscribe := func() error {
 		var retryCount int
-		ec.logger.Warn("Resubscribing to Ethereum node", "attempt", retryCount) // anomalous
+		ec.logger.Warn("Resubscribing to Ethereum node", "attempt", retryCount)
 		sub.Unsubscribe()
 
 		return utils.Retry(ctx, ec.maxRetries, func() error {
 			retryCount++
+			ec.logger.Debug("Calling SubscribeNewHead", "retryCount", retryCount)
 			sub, err = ec.client.SubscribeNewHead(ctx, headers)
-			return err
+			if err != nil {
+				ec.logger.Error("SubscribeNewHead failed", "retryCount", retryCount, "error", err)
+				return err
+			}
+			ec.logger.Debug("SubscribeNewHead succeeded", "retryCount", retryCount)
+			return nil
 		})
 	}
 
