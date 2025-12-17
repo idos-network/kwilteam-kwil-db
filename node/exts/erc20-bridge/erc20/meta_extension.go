@@ -1901,6 +1901,7 @@ func (r *rewardExtensionInfo) startDepositListener() error {
 
 			var depositIter *abigen.RewardDistributorDepositIterator
 			err = utils.Retry(ctx, evmMaxRetries, func() error {
+				logger.Debug("filtering deposit logs", "startBlock", startBlock, "endBlock", endBlock)
 				depositIter, err = escrowFilt.FilterDeposit(&bind.FilterOpts{
 					Start:   startBlock,
 					End:     &endBlock,
@@ -1917,6 +1918,7 @@ func (r *rewardExtensionInfo) startDepositListener() error {
 			defer depositIter.Close()
 
 			for depositIter.Next() {
+				logger.Debug("received deposit event", "event", depositIter.Event)
 				logs = append(logs, &evmsync.EthLog{
 					Metadata: logTypeDeposit,
 					Log:      &depositIter.Event.Raw,
@@ -1928,6 +1930,7 @@ func (r *rewardExtensionInfo) startDepositListener() error {
 
 			var postIter *abigen.RewardDistributorRewardPostedIterator
 			err = utils.Retry(ctx, evmMaxRetries, func() error {
+				logger.Debug("filtering reward posted logs", "startBlock", startBlock, "endBlock", endBlock)
 				postIter, err = escrowFilt.FilterRewardPosted(&bind.FilterOpts{
 					Start:   startBlock,
 					End:     &endBlock,
@@ -1944,6 +1947,7 @@ func (r *rewardExtensionInfo) startDepositListener() error {
 			defer postIter.Close()
 
 			for postIter.Next() {
+				logger.Debug("received poster event", "event", postIter.Event)
 				logs = append(logs, &evmsync.EthLog{
 					Metadata: logTypeConfirmedEpoch,
 					Log:      &postIter.Event.Raw,
