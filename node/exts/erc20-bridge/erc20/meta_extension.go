@@ -467,58 +467,59 @@ func init() {
 						getSingleton().instances.Set(*instance.ID, instance)
 					}
 
-					// Start validator signer services for non-custodial withdrawals
-					// This runs in background and submits validator signatures via transactions
-					for _, instance := range instances {
-						if instance.active && instance.synced {
-							instanceIDStr := instance.ID.String()
+					// Start validator signer services for non-custodial withdrawals (optional; enabled via erc20_bridge.enable_validator_signer = true)
+					if app.Service.LocalConfig != nil && app.Service.LocalConfig.Erc20Bridge.EnableValidatorSigner {
+						for _, instance := range instances {
+							if instance.active && instance.synced {
+								instanceIDStr := instance.ID.String()
 
-							// Check if signer is already running for this instance
-							runningSignersMu.Lock()
-							alreadyRunning := runningSigners[instanceIDStr]
-							if !alreadyRunning {
-								runningSigners[instanceIDStr] = true
-							}
-							runningSignersMu.Unlock()
-
-							if alreadyRunning {
-								if app.Service != nil && app.Service.Logger != nil {
-									app.Service.Logger.Debugf("validator signer already running for instance %s, skipping", instance.ID)
+								// Check if signer is already running for this instance
+								runningSignersMu.Lock()
+								alreadyRunning := runningSigners[instanceIDStr]
+								if !alreadyRunning {
+									runningSigners[instanceIDStr] = true
 								}
-								continue
-							}
+								runningSignersMu.Unlock()
 
-							// Try to get validator signer
-							signer, err := getValidatorSigner(app, instance.ID)
-							if err != nil {
-								if app.Service != nil && app.Service.Logger != nil {
-									app.Service.Logger.Warnf("failed to get validator signer for instance %s: %v", instance.ID, err)
+								if alreadyRunning {
+									if app.Service != nil && app.Service.Logger != nil {
+										app.Service.Logger.Debugf("validator signer already running for instance %s, skipping", instance.ID)
+									}
+									continue
 								}
-								// Clean up tracking maps on error
-								runningSignersMu.Lock()
-								delete(runningSigners, instanceIDStr)
-								delete(runningSignerCancels, instanceIDStr)
-								runningSignersMu.Unlock()
-								continue
-							}
-							if signer != nil {
-								// Create cancellable context so we can stop the signer when instance is disabled
-								// Use context.Background() as parent so signer runs for node lifetime (until cancelled)
-								signerCtx, cancel := context.WithCancel(context.Background())
 
-								// Store cancel function for cleanup on disable
-								runningSignersMu.Lock()
-								runningSignerCancels[instanceIDStr] = cancel
-								runningSignersMu.Unlock()
+								// Try to get validator signer
+								signer, err := getValidatorSigner(app, instance.ID)
+								if err != nil {
+									if app.Service != nil && app.Service.Logger != nil {
+										app.Service.Logger.Warnf("failed to get validator signer for instance %s: %v", instance.ID, err)
+									}
+									// Clean up tracking maps on error
+									runningSignersMu.Lock()
+									delete(runningSigners, instanceIDStr)
+									delete(runningSignerCancels, instanceIDStr)
+									runningSignersMu.Unlock()
+									continue
+								}
+								if signer != nil {
+									// Create cancellable context so we can stop the signer when instance is disabled
+									// Use context.Background() as parent so signer runs for node lifetime (until cancelled)
+									signerCtx, cancel := context.WithCancel(context.Background())
 
-								// Start background signer with cancellable context
-								go signer.Start(signerCtx)
-							} else {
-								// No signer available, clean up tracking maps
-								runningSignersMu.Lock()
-								delete(runningSigners, instanceIDStr)
-								delete(runningSignerCancels, instanceIDStr)
-								runningSignersMu.Unlock()
+									// Store cancel function for cleanup on disable
+									runningSignersMu.Lock()
+									runningSignerCancels[instanceIDStr] = cancel
+									runningSignersMu.Unlock()
+
+									// Start background signer with cancellable context
+									go signer.Start(signerCtx)
+								} else {
+									// No signer available, clean up tracking maps
+									runningSignersMu.Lock()
+									delete(runningSigners, instanceIDStr)
+									delete(runningSignerCancels, instanceIDStr)
+									runningSignersMu.Unlock()
+								}
 							}
 						}
 					}
