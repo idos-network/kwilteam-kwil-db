@@ -34,8 +34,8 @@ import (
 const (
 	// maxInitRetries is the maximum number of times to retry initialization
 	// before failing. This prevents indefinite retries on persistent configuration errors.
-	// At 30s intervals, 100 retries = 50 minutes of retry attempts.
-	maxInitRetries = 100
+	// At 30s intervals, 1_000_000 retries = 1 year of retry attempts.
+	maxInitRetries = 1_000_000
 )
 
 // StateFilePath returns the state file.
