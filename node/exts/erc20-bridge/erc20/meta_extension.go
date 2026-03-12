@@ -467,58 +467,59 @@ func init() {
 						getSingleton().instances.Set(*instance.ID, instance)
 					}
 
-					// Start validator signer services for non-custodial withdrawals
-					// This runs in background and submits validator signatures via transactions
-					for _, instance := range instances {
-						if instance.active && instance.synced {
-							instanceIDStr := instance.ID.String()
+					// Start validator signer services for non-custodial withdrawals (optional; enabled via erc20_bridge.enable_validator_signer = true)
+					if app.Service.LocalConfig != nil && app.Service.LocalConfig.Erc20Bridge.EnableValidatorSigner {
+						for _, instance := range instances {
+							if instance.active && instance.synced {
+								instanceIDStr := instance.ID.String()
 
-							// Check if signer is already running for this instance
-							runningSignersMu.Lock()
-							alreadyRunning := runningSigners[instanceIDStr]
-							if !alreadyRunning {
-								runningSigners[instanceIDStr] = true
-							}
-							runningSignersMu.Unlock()
-
-							if alreadyRunning {
-								if app.Service != nil && app.Service.Logger != nil {
-									app.Service.Logger.Debugf("validator signer already running for instance %s, skipping", instance.ID)
+								// Check if signer is already running for this instance
+								runningSignersMu.Lock()
+								alreadyRunning := runningSigners[instanceIDStr]
+								if !alreadyRunning {
+									runningSigners[instanceIDStr] = true
 								}
-								continue
-							}
+								runningSignersMu.Unlock()
 
-							// Try to get validator signer
-							signer, err := getValidatorSigner(app, instance.ID)
-							if err != nil {
-								if app.Service != nil && app.Service.Logger != nil {
-									app.Service.Logger.Warnf("failed to get validator signer for instance %s: %v", instance.ID, err)
+								if alreadyRunning {
+									if app.Service != nil && app.Service.Logger != nil {
+										app.Service.Logger.Debugf("validator signer already running for instance %s, skipping", instance.ID)
+									}
+									continue
 								}
-								// Clean up tracking maps on error
-								runningSignersMu.Lock()
-								delete(runningSigners, instanceIDStr)
-								delete(runningSignerCancels, instanceIDStr)
-								runningSignersMu.Unlock()
-								continue
-							}
-							if signer != nil {
-								// Create cancellable context so we can stop the signer when instance is disabled
-								// Use context.Background() as parent so signer runs for node lifetime (until cancelled)
-								signerCtx, cancel := context.WithCancel(context.Background())
 
-								// Store cancel function for cleanup on disable
-								runningSignersMu.Lock()
-								runningSignerCancels[instanceIDStr] = cancel
-								runningSignersMu.Unlock()
+								// Try to get validator signer
+								signer, err := getValidatorSigner(app, instance.ID)
+								if err != nil {
+									if app.Service != nil && app.Service.Logger != nil {
+										app.Service.Logger.Warnf("failed to get validator signer for instance %s: %v", instance.ID, err)
+									}
+									// Clean up tracking maps on error
+									runningSignersMu.Lock()
+									delete(runningSigners, instanceIDStr)
+									delete(runningSignerCancels, instanceIDStr)
+									runningSignersMu.Unlock()
+									continue
+								}
+								if signer != nil {
+									// Create cancellable context so we can stop the signer when instance is disabled
+									// Use context.Background() as parent so signer runs for node lifetime (until cancelled)
+									signerCtx, cancel := context.WithCancel(context.Background())
 
-								// Start background signer with cancellable context
-								go signer.Start(signerCtx)
-							} else {
-								// No signer available, clean up tracking maps
-								runningSignersMu.Lock()
-								delete(runningSigners, instanceIDStr)
-								delete(runningSignerCancels, instanceIDStr)
-								runningSignersMu.Unlock()
+									// Store cancel function for cleanup on disable
+									runningSignersMu.Lock()
+									runningSignerCancels[instanceIDStr] = cancel
+									runningSignersMu.Unlock()
+
+									// Start background signer with cancellable context
+									go signer.Start(signerCtx)
+								} else {
+									// No signer available, clean up tracking maps
+									runningSignersMu.Lock()
+									delete(runningSigners, instanceIDStr)
+									delete(runningSignerCancels, instanceIDStr)
+									runningSignersMu.Unlock()
+								}
 							}
 						}
 					}
@@ -1338,11 +1339,12 @@ func init() {
 								return fmt.Errorf("epoch cannot be voted")
 							}
 
-							// Verify signature for non-custodial validator votes (nonce=0)
-							// This prevents forged votes from non-validators
+							// For nonce=0 we must distinguish custodial (Safe) vs non-custodial (validator) votes.
+							// Custodial: signature is over Safe tx hash (V=31/32). Do not verify here; Poster/Safe verify on-chain.
+							// Non-custodial: signature is over (reward_root, block_hash) (V=27/28). Verify and run threshold.
 							const nonCustodialNonce = 0
-							if nonce == nonCustodialNonce {
-								// Query epoch's reward_root and block_hash for signature verification
+							if nonce == nonCustodialNonce && !utils.IsGnosisStyleSignature(signature) {
+								// Non-custodial validator vote: verify signature over (reward_root, block_hash)
 								result, err := app.DB.Execute(ctx.TxContext.Ctx, `
 									SELECT reward_root, block_hash
 									FROM kwil_erc20_meta.epochs
@@ -1397,9 +1399,17 @@ func init() {
 								return err
 							}
 
-							// For non-custodial validator signatures (nonce=0), check threshold and confirm epoch
-							// This ensures epoch confirmation happens deterministically during consensus
-							if nonce == nonCustodialNonce {
+							// For non-custodial only: check threshold and confirm. Never confirm custodial (Safe) epochs here;
+							// those are confirmed by the listener when the on-chain event is seen.
+							if nonce == nonCustodialNonce && !utils.IsGnosisStyleSignature(signature) {
+								hasSafeVote, err := epochHasGnosisStyleVote(ctx.TxContext.Ctx, app, epochID)
+								if err != nil {
+									return fmt.Errorf("check custodial votes for epoch %s: %w", epochID, err)
+								}
+								if hasSafeVote {
+									// Custodial epoch (Safe owners voted); listener will confirm on on-chain event
+									return nil
+								}
 								// Calculate BFT threshold (2/3 of total validator voting power)
 								totalPower, thresholdPower, err := calculateBFTThreshold(app)
 								if err != nil {
@@ -1706,7 +1716,9 @@ func init() {
 		err := getSingleton().ForEachInstance(true, func(id *types.UUID, info *rewardExtensionInfo) error {
 			info.mu.RLock()
 			defer info.mu.RUnlock()
-
+			if !info.active {
+				return nil // skip inactive (e.g. unused) instances
+			}
 			// DEBUG: Log entry into end_block check
 			elapsedTime := block.Timestamp - info.currentEpoch.StartTime
 			if app.Service != nil && app.Service.Logger != nil {
@@ -2498,7 +2510,7 @@ func (r *rewardExtensionInfo) startDepositListener() (error, bool) {
 		Chain:      r.ChainInfo.Name,
 		GetLogs: func(ctx context.Context, client *ethclient.Client, startBlock, endBlock uint64, logger log.Logger) ([]*evmsync.EthLog, error) {
 			if logger != nil {
-				logger.Infof("[HEARTBEAT] Deposit Listener (%s) syncing blocks %d -> %d", instanceIDStr, startBlock, endBlock)
+				logger.Debugf("[HEARTBEAT] Deposit Listener (%s) syncing blocks %d -> %d", instanceIDStr, startBlock, endBlock)
 			}
 			var logs []*evmsync.EthLog
 
@@ -2692,7 +2704,7 @@ func (r *rewardExtensionInfo) startWithdrawalListener() (error, bool) {
 		Chain:      r.ChainInfo.Name,
 		GetLogs: func(ctx context.Context, client *ethclient.Client, startBlock, endBlock uint64, logger log.Logger) ([]*evmsync.EthLog, error) {
 			if logger != nil {
-				logger.Infof("[HEARTBEAT] Withdrawal Listener (%s) syncing blocks %d -> %d", instanceIDStr, startBlock, endBlock)
+				logger.Debugf("[HEARTBEAT] Withdrawal Listener (%s) syncing blocks %d -> %d", instanceIDStr, startBlock, endBlock)
 			}
 			bridgeFilt, err := abigen.NewTrufNetworkBridgeFilterer(escrowCopy, client)
 			if err != nil {
