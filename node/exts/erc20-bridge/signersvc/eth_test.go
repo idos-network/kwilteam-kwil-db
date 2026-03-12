@@ -76,6 +76,64 @@ func TestNewSafeFromEscrow_InvalidRPC(t *testing.T) {
 	assert.Nil(t, safe, "Safe should be nil on error")
 }
 
+// TestIsCustodialEscrow_InputValidation tests input validation for IsCustodialEscrow (no network).
+func TestIsCustodialEscrow_InputValidation(t *testing.T) {
+	validRPC := "http://localhost:8545"
+	validAddr := "0x0000000000000000000000000000000000000000"
+
+	t.Run("empty RPC URL", func(t *testing.T) {
+		custodial, err := IsCustodialEscrow("", validAddr)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be empty")
+		assert.False(t, custodial)
+	})
+
+	t.Run("invalid hex address", func(t *testing.T) {
+		custodial, err := IsCustodialEscrow(validRPC, "not-a-hex-address")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid escrow address")
+		assert.False(t, custodial)
+	})
+
+	t.Run("short hex address", func(t *testing.T) {
+		custodial, err := IsCustodialEscrow(validRPC, "0x1234")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid escrow address")
+		assert.False(t, custodial)
+	})
+
+	t.Run("invalid RPC URL", func(t *testing.T) {
+		custodial, err := IsCustodialEscrow("://bad", validAddr)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid RPC URL")
+		assert.False(t, custodial)
+	})
+}
+
+// TestIsCustodialEscrow_CustodialBridge tests that custodial escrow (RewardDistributor) returns true.
+func TestIsCustodialEscrow_CustodialBridge(t *testing.T) {
+	sepoliaEscrow := "0x502430ed0bbe0f230215870c9c2853e126ee5ae3"
+	sepoliaRPC := os.Getenv("SEPOLIA_RPC")
+	if sepoliaRPC == "" {
+		t.Skip("SEPOLIA_RPC not configured")
+	}
+	custodial, err := IsCustodialEscrow(sepoliaRPC, sepoliaEscrow)
+	require.NoError(t, err)
+	assert.True(t, custodial, "RewardDistributor with Safe() should be detected as custodial")
+}
+
+// TestIsCustodialEscrow_NonCustodialBridge tests that non-custodial escrow (TrufNetworkBridge) returns false.
+func TestIsCustodialEscrow_NonCustodialBridge(t *testing.T) {
+	hoodiEscrow := "0x878D6aaeB6e746033f50B8dC268d54B4631554E7"
+	hoodiRPC := os.Getenv("HOODI_RPC")
+	if hoodiRPC == "" {
+		t.Skip("HOODI_RPC not configured")
+	}
+	custodial, err := IsCustodialEscrow(hoodiRPC, hoodiEscrow)
+	require.NoError(t, err)
+	assert.False(t, custodial, "TrufNetworkBridge without Safe() should be detected as non-custodial")
+}
+
 // TestNewSafeFromEscrow_InputValidation tests input validation for NewSafeFromEscrow
 func TestNewSafeFromEscrow_InputValidation(t *testing.T) {
 	validRPC := "http://localhost:8545"

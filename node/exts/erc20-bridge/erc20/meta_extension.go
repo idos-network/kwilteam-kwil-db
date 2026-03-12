@@ -44,6 +44,7 @@ import (
 	"github.com/trufnetwork/kwil-db/extensions/resolutions"
 	"github.com/trufnetwork/kwil-db/node/engine"
 	"github.com/trufnetwork/kwil-db/node/exts/erc20-bridge/abigen"
+	"github.com/trufnetwork/kwil-db/node/exts/erc20-bridge/signersvc"
 	"github.com/trufnetwork/kwil-db/node/exts/erc20-bridge/utils"
 	evmsync "github.com/trufnetwork/kwil-db/node/exts/evm-sync"
 	"github.com/trufnetwork/kwil-db/node/exts/evm-sync/chains"
@@ -467,59 +468,73 @@ func init() {
 						getSingleton().instances.Set(*instance.ID, instance)
 					}
 
-					// Start validator signer services for non-custodial withdrawals (optional; enabled via erc20_bridge.enable_validator_signer = true)
-					if app.Service.LocalConfig != nil && app.Service.LocalConfig.Erc20Bridge.EnableValidatorSigner {
+					// Start validator signer services for non-custodial instances only (custodial/Gnosis Safe escrows use multisig, not in-node signer)
+					if app.Service.LocalConfig != nil {
 						for _, instance := range instances {
-							if instance.active && instance.synced {
-								instanceIDStr := instance.ID.String()
+							if !instance.active || !instance.synced {
+								continue
+							}
+							chainName := strings.ToLower(instance.ChainInfo.Name.String())
+							rpc, hasRPC := app.Service.LocalConfig.Erc20Bridge.RPC[chainName]
+							if !hasRPC || rpc == "" {
+								if app.Service.Logger != nil {
+									app.Service.Logger.Warnf("no RPC for chain %s, skipping validator signer for instance %s", chainName, instance.ID)
+								}
+								continue
+							}
+							custodial, err := signersvc.IsCustodialEscrow(rpc, instance.EscrowAddress.Hex())
+							if err != nil {
+								if app.Service.Logger != nil {
+									app.Service.Logger.Warnf("failed to detect escrow type for instance %s: %v, skipping validator signer", instance.ID, err)
+								}
+								continue
+							}
+							if custodial {
+								if app.Service.Logger != nil {
+									app.Service.Logger.Infof("instance %s is custodial (Gnosis Safe), not starting validator signer", instance.ID)
+								}
+								continue
+							}
+							instanceIDStr := instance.ID.String()
 
-								// Check if signer is already running for this instance
+							// Check if signer is already running for this instance
+							runningSignersMu.Lock()
+							alreadyRunning := runningSigners[instanceIDStr]
+							if !alreadyRunning {
+								runningSigners[instanceIDStr] = true
+							}
+							runningSignersMu.Unlock()
+
+							if alreadyRunning {
+								if app.Service.Logger != nil {
+									app.Service.Logger.Debugf("validator signer already running for instance %s, skipping", instance.ID)
+								}
+								continue
+							}
+
+							// Try to get validator signer
+							signer, err := getValidatorSigner(app, instance.ID)
+							if err != nil {
+								if app.Service.Logger != nil {
+									app.Service.Logger.Warnf("failed to get validator signer for instance %s: %v", instance.ID, err)
+								}
 								runningSignersMu.Lock()
-								alreadyRunning := runningSigners[instanceIDStr]
-								if !alreadyRunning {
-									runningSigners[instanceIDStr] = true
-								}
+								delete(runningSigners, instanceIDStr)
+								delete(runningSignerCancels, instanceIDStr)
 								runningSignersMu.Unlock()
-
-								if alreadyRunning {
-									if app.Service != nil && app.Service.Logger != nil {
-										app.Service.Logger.Debugf("validator signer already running for instance %s, skipping", instance.ID)
-									}
-									continue
-								}
-
-								// Try to get validator signer
-								signer, err := getValidatorSigner(app, instance.ID)
-								if err != nil {
-									if app.Service != nil && app.Service.Logger != nil {
-										app.Service.Logger.Warnf("failed to get validator signer for instance %s: %v", instance.ID, err)
-									}
-									// Clean up tracking maps on error
-									runningSignersMu.Lock()
-									delete(runningSigners, instanceIDStr)
-									delete(runningSignerCancels, instanceIDStr)
-									runningSignersMu.Unlock()
-									continue
-								}
-								if signer != nil {
-									// Create cancellable context so we can stop the signer when instance is disabled
-									// Use context.Background() as parent so signer runs for node lifetime (until cancelled)
-									signerCtx, cancel := context.WithCancel(context.Background())
-
-									// Store cancel function for cleanup on disable
-									runningSignersMu.Lock()
-									runningSignerCancels[instanceIDStr] = cancel
-									runningSignersMu.Unlock()
-
-									// Start background signer with cancellable context
-									go signer.Start(signerCtx)
-								} else {
-									// No signer available, clean up tracking maps
-									runningSignersMu.Lock()
-									delete(runningSigners, instanceIDStr)
-									delete(runningSignerCancels, instanceIDStr)
-									runningSignersMu.Unlock()
-								}
+								continue
+							}
+							if signer != nil {
+								signerCtx, cancel := context.WithCancel(context.Background())
+								runningSignersMu.Lock()
+								runningSignerCancels[instanceIDStr] = cancel
+								runningSignersMu.Unlock()
+								go signer.Start(signerCtx)
+							} else {
+								runningSignersMu.Lock()
+								delete(runningSigners, instanceIDStr)
+								delete(runningSignerCancels, instanceIDStr)
+								runningSignersMu.Unlock()
 							}
 						}
 					}

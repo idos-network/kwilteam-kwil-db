@@ -151,6 +151,31 @@ func NewSafeFromEscrow(rpc string, escrowAddr string) (*Safe, error) {
 	}, nil
 }
 
+// Close closes the underlying RPC client. Call when the Safe is no longer needed
+// (e.g. after using IsCustodialEscrow, which only needs the custodial check).
+func (s *Safe) Close() {
+	if s != nil && s.eth != nil {
+		s.eth.Close()
+	}
+}
+
+// IsCustodialEscrow calls the escrow contract's Safe() method to determine bridge type.
+// It reuses NewSafeFromEscrow and does not keep the RPC client open.
+// Returns (true, nil) for custodial bridges (e.g. RewardDistributor with Gnosis Safe).
+// Returns (false, nil) for non-custodial bridges (e.g. TrufNetworkBridge).
+// Returns (false, err) for RPC/config/network errors.
+func IsCustodialEscrow(rpc string, escrowAddr string) (bool, error) {
+	safe, err := NewSafeFromEscrow(rpc, escrowAddr)
+	if err != nil {
+		if errors.Is(err, ErrNonCustodialBridge) {
+			return false, nil
+		}
+		return false, err
+	}
+	safe.Close()
+	return true, nil
+}
+
 func NewSafe(rpc string, addr string) (*Safe, error) {
 	// Validate RPC URL
 	if _, err := url.Parse(rpc); err != nil {
