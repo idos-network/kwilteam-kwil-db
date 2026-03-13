@@ -497,6 +497,94 @@ func TestStateSyncStreamTimeout(t *testing.T) {
 	}
 }
 
+func TestERC20BridgeConfig_Validate_StartBlock(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     ERC20BridgeConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "empty start_block",
+			cfg:     ERC20BridgeConfig{StartBlock: map[string]string{}},
+			wantErr: false,
+		},
+		{
+			name:    "nil start_block",
+			cfg:     ERC20BridgeConfig{},
+			wantErr: false,
+		},
+		{
+			name: "valid chain and block zero",
+			cfg: ERC20BridgeConfig{
+				StartBlock: map[string]string{"ethereum": "0"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid chain and positive block",
+			cfg: ERC20BridgeConfig{
+				StartBlock: map[string]string{"sepolia": "12345678"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid multiple chains",
+			cfg: ERC20BridgeConfig{
+				StartBlock: map[string]string{
+					"ethereum": "0",
+					"hoodi":    "100",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "chain name case insensitive",
+			cfg: ERC20BridgeConfig{
+				StartBlock: map[string]string{"Ethereum": "0"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "unknown chain",
+			cfg: ERC20BridgeConfig{
+				StartBlock: map[string]string{"unknown_chain": "0"},
+			},
+			wantErr: true,
+			errMsg:  "erc20_bridge.start_block: unknown chain",
+		},
+		{
+			name: "invalid value not a number",
+			cfg: ERC20BridgeConfig{
+				StartBlock: map[string]string{"ethereum": "not-a-number"},
+			},
+			wantErr: true,
+			errMsg:  "erc20_bridge.start_block: invalid value",
+		},
+		{
+			name: "invalid value negative",
+			cfg: ERC20BridgeConfig{
+				StartBlock: map[string]string{"ethereum": "-1"},
+			},
+			wantErr: true,
+			errMsg:  "erc20_bridge.start_block: value for chain \"ethereum\" must be non-negative",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errMsg != "" {
+					require.Contains(t, err.Error(), tt.errMsg)
+				}
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestBlacklistAutoBlacklistDuration(t *testing.T) {
 	tests := []struct {
 		name     string

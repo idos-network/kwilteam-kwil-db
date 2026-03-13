@@ -66,7 +66,7 @@ func init() {
 	err := resolutions.RegisterResolution(ExtensionName, resolutions.ModAdd, resolutions.ResolutionConfig{
 		RefundThreshold:       big.NewRat(1, 3),
 		ConfirmationThreshold: big.NewRat(1, 2),
-		ExpirationPeriod:      1 * time.Hour,
+		ExpirationPeriod:      720 * time.Hour, // Approximately 1 month. It should be enough to bring back an outdated/offline validator
 		ResolveFunc: func(ctx context.Context, app *common.App, resolution *resolutions.Resolution, block *common.BlockContext) error {
 			res := &ResolutionMessage{}
 			err := res.UnmarshalBinary(resolution.Body)
