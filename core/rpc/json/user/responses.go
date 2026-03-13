@@ -126,5 +126,5 @@ type ListenerSyncStatusResponse struct {
 type ListenerStatusEntry struct {
 	Topic              string `json:"topic"`
 	Chain              string `json:"chain"`
-	LastProcessedBlock  int64  `json:"last_processed_block"`
+	LastProcessedBlock int64  `json:"last_processed_block"`
 }
