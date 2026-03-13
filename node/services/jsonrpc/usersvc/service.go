@@ -202,7 +202,7 @@ func NewService(db DB, engine EngineReader, chainClient BlockchainTransactor,
 // or any other breaking changes.
 const (
 	apiVerMajor = 0
-	apiVerMinor = 2
+	apiVerMinor = 3
 	apiVerPatch = 0
 
 	serviceName = "user"
