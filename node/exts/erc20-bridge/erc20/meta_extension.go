@@ -348,30 +348,35 @@ func init() {
 			// will acquire the write lock
 			info.mu.Unlock()
 
-			// Start both deposit and withdrawal listeners
+			// Start deposit listener (all instances)
 			depositErr, depositStarted := info.startDepositListener()
 			if depositErr != nil {
 				return depositErr
 			}
 
-			withdrawalErr, _ := info.startWithdrawalListener()
-			if withdrawalErr != nil {
-				// Cleanup: Only unregister deposit listener if WE started it
-				if depositStarted {
-					instanceIDStr := id.String()
-					cleanupErr := evmsync.EventSyncer.UnregisterListener(depositListenerUniqueName(*id))
-					if cleanupErr != nil {
-						logger := app.Service.Logger
-						if logger != nil {
-							logger.Warnf("failed to cleanup deposit listener after withdrawal listener failure: %v", cleanupErr)
+			// Start withdrawal listener only for non-custodial instances (custodial/Gnosis Safe confirm on-chain)
+			if shouldStartWithdrawalListener(app, info) {
+				withdrawalErr, _ := info.startWithdrawalListener()
+				if withdrawalErr != nil {
+					// Cleanup: Only unregister deposit listener if WE started it
+					if depositStarted {
+						instanceIDStr := id.String()
+						cleanupErr := evmsync.EventSyncer.UnregisterListener(depositListenerUniqueName(*id))
+						if cleanupErr != nil {
+							logger := app.Service.Logger
+							if logger != nil {
+								logger.Warnf("failed to cleanup deposit listener after withdrawal listener failure: %v", cleanupErr)
+							}
 						}
+						// Remove tracking entry
+						runningListenersMu.Lock()
+						delete(runningDepositListeners, instanceIDStr)
+						runningListenersMu.Unlock()
 					}
-					// Remove tracking entry
-					runningListenersMu.Lock()
-					delete(runningDepositListeners, instanceIDStr)
-					runningListenersMu.Unlock()
+					return withdrawalErr
 				}
-				return withdrawalErr
+			} else if app.Service != nil && app.Service.Logger != nil {
+				app.Service.Logger.Infof("instance %s is custodial (Gnosis Safe), not starting withdrawal listener", info.ID)
 			}
 			return nil
 		}
@@ -434,28 +439,32 @@ func init() {
 						// deposit listener. Otherwise, we should start the state poller
 						if instance.active {
 							if instance.synced {
-								// Start both deposit and withdrawal listeners
-								// These methods are idempotent - safe to call multiple times
+								// Start deposit listener (all instances)
 								depositErr, depositStarted := instance.startDepositListener()
 								if depositErr != nil {
 									return depositErr
 								}
 
-								withdrawalErr, _ := instance.startWithdrawalListener()
-								if withdrawalErr != nil {
-									// Cleanup: Only unregister deposit listener if WE started it
-									if depositStarted {
-										instanceIDStr := instance.ID.String()
-										cleanupErr := evmsync.EventSyncer.UnregisterListener(depositListenerUniqueName(*instance.ID))
-										if cleanupErr != nil && app.Service != nil && app.Service.Logger != nil {
-											app.Service.Logger.Warnf("failed to cleanup deposit listener after withdrawal listener failure: %v", cleanupErr)
+								// Start withdrawal listener only for non-custodial instances (custodial/Gnosis Safe confirm on-chain)
+								if shouldStartWithdrawalListener(app, instance) {
+									withdrawalErr, _ := instance.startWithdrawalListener()
+									if withdrawalErr != nil {
+										// Cleanup: Only unregister deposit listener if WE started it
+										if depositStarted {
+											instanceIDStr := instance.ID.String()
+											cleanupErr := evmsync.EventSyncer.UnregisterListener(depositListenerUniqueName(*instance.ID))
+											if cleanupErr != nil && app.Service != nil && app.Service.Logger != nil {
+												app.Service.Logger.Warnf("failed to cleanup deposit listener after withdrawal listener failure: %v", cleanupErr)
+											}
+											// Remove tracking entry
+											runningListenersMu.Lock()
+											delete(runningDepositListeners, instanceIDStr)
+											runningListenersMu.Unlock()
 										}
-										// Remove tracking entry
-										runningListenersMu.Lock()
-										delete(runningDepositListeners, instanceIDStr)
-										runningListenersMu.Unlock()
+										return withdrawalErr
 									}
-									return withdrawalErr
+								} else if app.Service != nil && app.Service.Logger != nil {
+									app.Service.Logger.Infof("instance %s is custodial (Gnosis Safe), not starting withdrawal listener", instance.ID)
 								}
 							} else {
 								err = instance.startStatePoller()
@@ -474,18 +483,10 @@ func init() {
 							if !instance.active || !instance.synced {
 								continue
 							}
-							chainName := strings.ToLower(instance.ChainInfo.Name.String())
-							rpc, hasRPC := app.Service.LocalConfig.Erc20Bridge.RPC[chainName]
-							if !hasRPC || rpc == "" {
-								if app.Service.Logger != nil {
-									app.Service.Logger.Warnf("no RPC for chain %s, skipping validator signer for instance %s", chainName, instance.ID)
-								}
-								continue
-							}
-							custodial, err := signersvc.IsCustodialEscrow(rpc, instance.EscrowAddress.Hex())
+							custodial, err := isInstanceCustodial(app, instance)
 							if err != nil {
 								if app.Service.Logger != nil {
-									app.Service.Logger.Warnf("failed to detect escrow type for instance %s: %v, skipping validator signer", instance.ID, err)
+									app.Service.Logger.Warnf("skipping validator signer for instance %s: %v", instance.ID, err)
 								}
 								continue
 							}
@@ -632,22 +633,26 @@ func init() {
 										return depositErr
 									}
 
-									// Start withdrawal listener
-									withdrawalErr, _ := info.startWithdrawalListener()
-									if withdrawalErr != nil {
-										// Cleanup: Only unregister deposit listener if WE started it
-										if depositStarted {
-											instanceIDStr := id.String()
-											cleanupErr := evmsync.EventSyncer.UnregisterListener(depositListenerUniqueName(id))
-											if cleanupErr != nil && app.Service != nil && app.Service.Logger != nil {
-												app.Service.Logger.Warnf("failed to cleanup deposit listener after withdrawal listener failure: %v", cleanupErr)
+									// Start withdrawal listener only for non-custodial instances (custodial/Gnosis Safe confirm on-chain)
+									if shouldStartWithdrawalListener(app, info) {
+										withdrawalErr, _ := info.startWithdrawalListener()
+										if withdrawalErr != nil {
+											// Cleanup: Only unregister deposit listener if WE started it
+											if depositStarted {
+												instanceIDStr := id.String()
+												cleanupErr := evmsync.EventSyncer.UnregisterListener(depositListenerUniqueName(id))
+												if cleanupErr != nil && app.Service != nil && app.Service.Logger != nil {
+													app.Service.Logger.Warnf("failed to cleanup deposit listener after withdrawal listener failure: %v", cleanupErr)
+												}
+												// Remove tracking entry
+												runningListenersMu.Lock()
+												delete(runningDepositListeners, instanceIDStr)
+												runningListenersMu.Unlock()
 											}
-											// Remove tracking entry
-											runningListenersMu.Lock()
-											delete(runningDepositListeners, instanceIDStr)
-											runningListenersMu.Unlock()
+											return withdrawalErr
 										}
-										return withdrawalErr
+									} else if app.Service != nil && app.Service.Logger != nil {
+										app.Service.Logger.Infof("instance %s is custodial (Gnosis Safe), not starting withdrawal listener", info.ID)
 									}
 
 									return resultFn([]any{id})
@@ -3119,6 +3124,39 @@ func scaleDownUint256(amount *types.Decimal, decimals uint16) (*types.Decimal, e
 // ============================================================================
 // Validator Signing for Non-Custodial Withdrawals
 // ============================================================================
+
+// isInstanceCustodial returns whether the instance's escrow contract is custodial (Gnosis Safe).
+// It uses app config for RPC and the instance's chain and escrow address.
+// Returns (custodial, nil) when the check succeeds, (false, err) when config is missing, RPC is missing, or the contract check fails.
+func isInstanceCustodial(app *common.App, instance *rewardExtensionInfo) (bool, error) {
+	if app.Service == nil || app.Service.LocalConfig == nil {
+		return false, fmt.Errorf("no config")
+	}
+	chainName := strings.ToLower(instance.ChainInfo.Name.String())
+	rpc, hasRPC := app.Service.LocalConfig.Erc20Bridge.RPC[chainName]
+	if !hasRPC || rpc == "" {
+		return false, fmt.Errorf("no RPC for chain %s", chainName)
+	}
+	custodial, err := signersvc.IsCustodialEscrow(rpc, instance.EscrowAddress.Hex())
+	if err != nil {
+		return false, err
+	}
+	return custodial, nil
+}
+
+// shouldStartWithdrawalListener returns true if the instance is non-custodial and has RPC
+// configured, so the withdrawal listener should be started. Custodial (Gnosis Safe) instances
+// confirm withdrawals on-chain via the Safe; only non-custodial contracts need the listener.
+func shouldStartWithdrawalListener(app *common.App, instance *rewardExtensionInfo) bool {
+	custodial, err := isInstanceCustodial(app, instance)
+	if err != nil {
+		if app.Service != nil && app.Service.Logger != nil {
+			app.Service.Logger.Debugf("skip withdrawal listener for instance %s (escrow check failed: %v)", instance.ID, err)
+		}
+		return false
+	}
+	return !custodial
+}
 
 // getValidatorSigner returns a ValidatorSigner wrapper for the node's validator key.
 // For non-custodial validator voting, this MUST use the node's validator key (not bridge signer key)
