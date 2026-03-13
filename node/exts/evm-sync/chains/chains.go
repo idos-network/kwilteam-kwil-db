@@ -65,7 +65,7 @@ func init() {
 		ChainInfo{
 			Name:                  "hardhat",
 			ID:                    "31337",
-			RequiredConfirmations: 12,
+			RequiredConfirmations: 1,
 		},
 		ChainInfo{
 			Name:                  "arbitrum_sepolia",
