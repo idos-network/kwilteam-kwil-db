@@ -27,4 +27,5 @@ const (
 	MethodMigrationGenesisChunk jsonrpc.Method = "user.migration_genesis_chunk"
 	MethodChallenge             jsonrpc.Method = "user.challenge"
 	MethodGetWithdrawalProof    jsonrpc.Method = "user.get_withdrawal_proof"
+	MethodListenerSyncStatus   jsonrpc.Method = "user.listener_sync_status"
 )

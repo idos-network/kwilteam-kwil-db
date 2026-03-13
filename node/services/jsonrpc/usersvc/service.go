@@ -29,6 +29,7 @@ import (
 	nodeConsensus "github.com/trufnetwork/kwil-db/node/consensus"
 	"github.com/trufnetwork/kwil-db/node/engine"
 	bridgeUtils "github.com/trufnetwork/kwil-db/node/exts/erc20-bridge/utils"
+	evmsync "github.com/trufnetwork/kwil-db/node/exts/evm-sync"
 	"github.com/trufnetwork/kwil-db/node/metrics"
 	"github.com/trufnetwork/kwil-db/node/migrations"
 	rpcserver "github.com/trufnetwork/kwil-db/node/services/jsonrpc"
@@ -85,6 +86,7 @@ type Service struct {
 	chainClient BlockchainTransactor
 	validators  Validators
 	migrator    Migrator
+	eventStore  *voting.EventStore // optional; for listener_sync_status
 
 	// challenges issued to the clients
 	challengeMtx     sync.Mutex
@@ -148,8 +150,9 @@ const (
 )
 
 // NewService creates a new instance of the user RPC service.
+// eventStore may be nil; if set, ListenerSyncStatus will return EVM listener sync status.
 func NewService(db DB, engine EngineReader, chainClient BlockchainTransactor,
-	nodeApp NodeApp, vals Validators, migrator Migrator, logger log.Logger, opts ...Opt) *Service {
+	nodeApp NodeApp, vals Validators, migrator Migrator, logger log.Logger, eventStore *voting.EventStore, opts ...Opt) *Service {
 	cfg := &serviceCfg{
 		readTxTimeout:      defaultReadTxTimeout,
 		challengeExpiry:    defaultChallengeExpiry,
@@ -170,6 +173,7 @@ func NewService(db DB, engine EngineReader, chainClient BlockchainTransactor,
 		validators:       vals,
 		db:               db,
 		migrator:         migrator,
+		eventStore:       eventStore,
 		privateMode:      cfg.privateMode,
 		challengeExpiry:  cfg.challengeExpiry,
 		challenges:       make(map[[32]byte]time.Time),
@@ -396,6 +400,12 @@ func (svc *Service) Methods() map[jsonrpc.Method]rpcserver.MethodDef {
 		userjson.MethodGetWithdrawalProof: rpcserver.MakeMethodDef(svc.GetWithdrawalProof,
 			"get withdrawal proof and validator signatures for an epoch",
 			"merkle proof, validator signatures, and withdrawal status",
+		),
+
+		// Listener sync status (EVM listeners last processed block; for health monitoring)
+		userjson.MethodListenerSyncStatus: rpcserver.MakeMethodDef(svc.ListenerSyncStatus,
+			"return last processed block per EVM listener",
+			"list of listeners with topic, chain, last_processed_block",
 		),
 	}
 }
@@ -1078,6 +1088,28 @@ func (svc *Service) CallChallenge(ctx context.Context, req *userjson.ChallengeRe
 	return &userjson.ChallengeResponse{
 		Challenge: challenge[:],
 	}, nil
+}
+
+// ListenerSyncStatus returns the last processed block for each registered EVM listener.
+func (svc *Service) ListenerSyncStatus(ctx context.Context, _ *userjson.ListenerSyncStatusRequest) (*userjson.ListenerSyncStatusResponse, *jsonrpc.Error) {
+	if svc.eventStore == nil {
+		return &userjson.ListenerSyncStatusResponse{Listeners: nil}, nil
+	}
+	kv := svc.eventStore.KV([]byte("evm_sync "))
+	statuses, err := evmsync.GetListenerSyncStatus(ctx, kv)
+	if err != nil {
+		svc.log.Error("listener sync status", "error", err)
+		return nil, jsonrpc.NewError(jsonrpc.ErrorNodeInternal, err.Error(), nil)
+	}
+	entries := make([]userjson.ListenerStatusEntry, len(statuses))
+	for i := range statuses {
+		entries[i] = userjson.ListenerStatusEntry{
+			Topic:              statuses[i].Topic,
+			Chain:              statuses[i].Chain,
+			LastProcessedBlock: statuses[i].LastProcessedBlock,
+		}
+	}
+	return &userjson.ListenerSyncStatusResponse{Listeners: entries}, nil
 }
 
 // GetWithdrawalProof retrieves the merkle proof and validator signatures for a withdrawal.

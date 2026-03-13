@@ -144,6 +144,59 @@ func (l *globalListenerManager) UnregisterListener(uniqueName string) error {
 	return nil
 }
 
+// EventKVReader is a minimal read-only view of the listener KV store.
+// It is used by GetListenerSyncStatus so evm-sync does not depend on node/voting.
+// Callers pass eventStore.KV([]byte("evm_sync ")) from the voting.EventStore.
+type EventKVReader interface {
+	Get(ctx context.Context, key []byte) ([]byte, error)
+}
+
+// ListenerStatus is the sync status of one EVM listener (topic, chain, last processed block).
+type ListenerStatus struct {
+	Topic               string
+	Chain               string
+	LastProcessedBlock  int64
+}
+
+// listenerTopics returns a snapshot of registered listener topics and their chain names.
+// Caller must not hold EventSyncer.mu.
+func (l *globalListenerManager) listenerTopics() []struct{ topic, chain string } {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]struct{ topic, chain string }, 0, len(l.listeners))
+	for topic, info := range l.listeners {
+		out = append(out, struct{ topic, chain string }{topic, string(info.chain.Name)})
+	}
+	return out
+}
+
+// lastSeenHeightKeyForStatus matches the key format used in listener.go for last seen block.
+const lastSeenHeightKeyForStatus = "lh"
+
+// GetListenerSyncStatus returns the last processed block for each registered EVM listener.
+// kv must be the evm_sync-scoped KV (e.g. eventStore.KV([]byte("evm_sync "))).
+func GetListenerSyncStatus(ctx context.Context, kv EventKVReader) ([]ListenerStatus, error) {
+	topics := EventSyncer.listenerTopics()
+	result := make([]ListenerStatus, 0, len(topics))
+	for _, t := range topics {
+		key := append([]byte(lastSeenHeightKeyForStatus), []byte(t.topic)...)
+		val, err := kv.Get(ctx, key)
+		if err != nil {
+			return nil, fmt.Errorf("get last seen height for %s: %w", t.topic, err)
+		}
+		var lastBlock int64
+		if len(val) >= 8 {
+			lastBlock = int64(binary.LittleEndian.Uint64(val))
+		}
+		result = append(result, ListenerStatus{
+			Topic:              t.topic,
+			Chain:              t.chain,
+			LastProcessedBlock: lastBlock,
+		})
+	}
+	return result, nil
+}
+
 // listen starts all listeners.
 // If it returns an error, the node will stop
 func (l *globalListenerManager) listen(ctx context.Context, service *common.Service, eventstore listeners.EventStore, syncConf *syncConfig) error {

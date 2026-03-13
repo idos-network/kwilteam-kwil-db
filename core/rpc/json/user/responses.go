@@ -116,3 +116,15 @@ type WithdrawalProofResponse struct {
 	EstimatedReadyAt    *int64               `json:"estimated_ready_at,omitempty"` // Unix timestamp (seconds), null if not pending
 	EthTxHash           *string              `json:"eth_tx_hash,omitempty"`        // Ethereum TX hash if completed (0x...)
 }
+
+// ListenerSyncStatusResponse is the response for user.listener_sync_status.
+type ListenerSyncStatusResponse struct {
+	Listeners []ListenerStatusEntry `json:"listeners"`
+}
+
+// ListenerStatusEntry is one EVM listener's sync status.
+type ListenerStatusEntry struct {
+	Topic              string `json:"topic"`
+	Chain              string `json:"chain"`
+	LastProcessedBlock  int64  `json:"last_processed_block"`
+}

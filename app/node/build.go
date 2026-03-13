@@ -128,7 +128,7 @@ func buildServer(ctx context.Context, d *coreDependencies) *server {
 
 	// RPC Services
 	rpcSvcLogger := d.logger.New("USER")
-	jsonRPCTxSvc := usersvc.NewService(db, e, node, bp, vs, migrator, rpcSvcLogger,
+	jsonRPCTxSvc := usersvc.NewService(db, e, node, bp, vs, migrator, rpcSvcLogger, es,
 		usersvc.WithReadTxTimeout(time.Duration(d.cfg.DB.ReadTxTimeout)),
 		usersvc.WithPrivateMode(d.cfg.RPC.Private),
 		usersvc.WithChallengeExpiry(time.Duration(d.cfg.RPC.ChallengeExpiry)),
