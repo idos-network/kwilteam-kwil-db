@@ -32,9 +32,9 @@ func TestGetChainInfo(t *testing.T) {
 		{Sepolia, "11155111", 12},
 		{BaseSepolia, "84532", 12},
 		{Hoodi, "560048", 12},
-		{Hardhat, "31337", 12},
-		{ArbitrumSepolia, "421614", 2},
-		{ArbitrumOne, "42161", 4},
+		{Hardhat, "31337", 1},
+		{ArbitrumSepolia, "421614", 12},
+		{ArbitrumOne, "42161", 12},
 	}
 
 	for _, tc := range tests {
