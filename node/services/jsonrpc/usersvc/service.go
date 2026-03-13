@@ -70,6 +70,51 @@ type Migrator interface {
 	GetGenesisSnapshotChunk(chunkIdx uint32) ([]byte, error)
 }
 
+// listenerSyncEventStore provides KV access for listener sync status.
+// Use WrapListenerSyncEventStore to adapt *voting.EventStore.
+type listenerSyncEventStore interface {
+	KV(prefix []byte) ListenerSyncKVReader
+}
+
+// ListenerSyncKVReader is the KV view used for listener sync. *voting.KV implements it.
+// Callers that cannot depend on voting (e.g. app/node to avoid interface satisfaction across packages)
+// can implement this via an adapter that delegates to *voting.KV.
+type ListenerSyncKVReader interface {
+	Get(ctx context.Context, key []byte) ([]byte, error)
+}
+
+// WrapListenerSyncEventStore adapts *voting.EventStore to listenerSyncEventStore.
+func WrapListenerSyncEventStore(es *voting.EventStore) listenerSyncEventStore {
+	if es == nil {
+		return nil
+	}
+	return &listenerSyncEventStoreWrap{es: es}
+}
+
+type listenerSyncEventStoreWrap struct {
+	es *voting.EventStore
+}
+
+func (w *listenerSyncEventStoreWrap) KV(prefix []byte) ListenerSyncKVReader {
+	return (*votingKVReader)(w.es.KV(prefix))
+}
+
+// votingKVReader adapts *voting.KV to ListenerSyncKVReader (same package, so *voting.KV can be used).
+type votingKVReader voting.KV
+
+func (r *votingKVReader) Get(ctx context.Context, key []byte) ([]byte, error) {
+	return (*voting.KV)(r).Get(ctx, key)
+}
+
+// kvReaderAdapter adapts ListenerSyncKVReader to evmsync.EventKVReader.
+type kvReaderAdapter struct{ ListenerSyncKVReader }
+
+func (a *kvReaderAdapter) Get(ctx context.Context, key []byte) ([]byte, error) {
+	return a.ListenerSyncKVReader.Get(ctx, key)
+}
+
+var _ evmsync.EventKVReader = (*kvReaderAdapter)(nil)
+
 var _ metrics.RPCMetrics = metrics.RPC // var mets, when needed
 
 // Service is the "user" RPC service, also known as txsvc in other contexts.
@@ -86,7 +131,7 @@ type Service struct {
 	chainClient BlockchainTransactor
 	validators  Validators
 	migrator    Migrator
-	eventStore  *voting.EventStore // optional; for listener_sync_status
+	eventStore  listenerSyncEventStore // optional; for listener_sync_status
 
 	// challenges issued to the clients
 	challengeMtx     sync.Mutex
@@ -152,7 +197,7 @@ const (
 // NewService creates a new instance of the user RPC service.
 // eventStore may be nil; if set, ListenerSyncStatus will return EVM listener sync status.
 func NewService(db DB, engine EngineReader, chainClient BlockchainTransactor,
-	nodeApp NodeApp, vals Validators, migrator Migrator, logger log.Logger, eventStore *voting.EventStore, opts ...Opt) *Service {
+	nodeApp NodeApp, vals Validators, migrator Migrator, logger log.Logger, eventStore listenerSyncEventStore, opts ...Opt) *Service {
 	cfg := &serviceCfg{
 		readTxTimeout:      defaultReadTxTimeout,
 		challengeExpiry:    defaultChallengeExpiry,
@@ -1096,7 +1141,7 @@ func (svc *Service) ListenerSyncStatus(ctx context.Context, _ *userjson.Listener
 		return &userjson.ListenerSyncStatusResponse{Listeners: []userjson.ListenerStatusEntry{}}, nil
 	}
 	kv := svc.eventStore.KV([]byte("evm_sync "))
-	statuses, err := evmsync.GetListenerSyncStatus(ctx, kv)
+	statuses, err := evmsync.GetListenerSyncStatus(ctx, &kvReaderAdapter{kv})
 	if err != nil {
 		svc.log.Error("listener sync status", "error", err)
 		return nil, jsonrpc.NewError(jsonrpc.ErrorNodeInternal, err.Error(), nil)
