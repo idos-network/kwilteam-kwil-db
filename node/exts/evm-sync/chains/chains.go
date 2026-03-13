@@ -65,17 +65,17 @@ func init() {
 		ChainInfo{
 			Name:                  "hardhat",
 			ID:                    "31337",
-			RequiredConfirmations: 12,
+			RequiredConfirmations: 1,
 		},
 		ChainInfo{
 			Name:                  "arbitrum_sepolia",
 			ID:                    "421614",
-			RequiredConfirmations: 2,
+			RequiredConfirmations: 12,
 		},
 		ChainInfo{
 			Name:                  "arbitrum_one",
 			ID:                    "42161",
-			RequiredConfirmations: 4,
+			RequiredConfirmations: 12,
 		},
 	)
 	if err != nil {

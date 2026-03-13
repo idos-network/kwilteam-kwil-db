@@ -380,9 +380,10 @@ func DefaultConfig() *Config {
 			Hash:   "",
 		},
 		Erc20Bridge: ERC20BridgeConfig{
-			RPC:                make(map[string]string),
-			BlockSyncChuckSize: make(map[string]string),
-			Signer:             make(map[string]string),
+			RPC:                       make(map[string]string),
+			BlockSyncChuckSize:        make(map[string]string),
+			Signer:                    make(map[string]string),
+			EnableNonCustodialBridges: false,
 		},
 		SkipDependencyVerification: false,
 		PGDumpPath:                 "pg_dump",
@@ -614,10 +615,11 @@ type Checkpoint struct {
 }
 
 type ERC20BridgeConfig struct {
-	RPC                map[string]string `toml:"rpc" comment:"evm websocket RPC; format: chain_name='rpc_url'"`
-	BlockSyncChuckSize map[string]string `toml:"block_sync_chuck_size" comment:"rpc option block sync chunk size; format: chain_name='chunk_size'"`
-	Signer             map[string]string `toml:"signer" comment:"signer service configuration; format: ext_alias='file_path_to_private_key'"`
-	StartBlock         map[string]string `toml:"start_block" comment:"starting block number for sync; format: chain_name='block_number'. Used when eventstore has no last seen height."`
+	RPC                       map[string]string `toml:"rpc" comment:"evm websocket RPC; format: chain_name='rpc_url'"`
+	BlockSyncChuckSize        map[string]string `toml:"block_sync_chuck_size" comment:"rpc option block sync chunk size; format: chain_name='chunk_size'"`
+	Signer                    map[string]string `toml:"signer" comment:"signer service configuration; format: ext_alias='file_path_to_private_key'"`
+	StartBlock                map[string]string `toml:"start_block" comment:"starting block number for sync; format: chain_name='block_number'. Used when eventstore has no last seen height."`
+	EnableNonCustodialBridges bool              `toml:"enable_non_custodial_bridges" comment:"if true, enable non-custodial bridge behavior (withdrawal listeners, validator signer); set false when all instances are custodial (Gnosis Safe)"`
 }
 
 // Validate validates the bridge general config, other validations will be performed
@@ -650,21 +652,17 @@ func (cfg ERC20BridgeConfig) Validate() error {
 		}
 	}
 
-	for chain, val := range cfg.StartBlock {
-		canonical := chains.Chain(strings.ToLower(chain))
-		if err := canonical.Valid(); err != nil {
-			return fmt.Errorf("erc20_bridge.start_block: invalid chain %s", chain)
-		}
-		if canonical.String() != chain {
-			return fmt.Errorf("erc20_bridge.start_block: use canonical chain name %q instead of %q", canonical.String(), chain)
+	for chain, startBlock := range cfg.StartBlock {
+		if err := chains.Chain(strings.ToLower(chain)).Valid(); err != nil {
+			return fmt.Errorf("erc20_bridge.start_block: unknown chain %q", chain)
 		}
 
-		v, err := strconv.ParseInt(val, 10, 64)
+		n, err := strconv.ParseInt(startBlock, 10, 64)
 		if err != nil {
-			return fmt.Errorf("erc20_bridge.start_block: invalid value for chain %s: %w", chain, err)
+			return fmt.Errorf("erc20_bridge.start_block: invalid value %q for chain %q: %w", startBlock, chain, err)
 		}
-		if v < 0 {
-			return fmt.Errorf("erc20_bridge.start_block: value for chain %s must be non-negative", chain)
+		if n < 0 {
+			return fmt.Errorf("erc20_bridge.start_block: value for chain %q must be non-negative", chain)
 		}
 	}
 

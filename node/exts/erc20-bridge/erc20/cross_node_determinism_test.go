@@ -236,12 +236,12 @@ func TestCrossNodeSignatureVerification(t *testing.T) {
 
 	// Node 1: Verify signature (cryptographic operation, no DB needed)
 	var node1Valid bool
-	err = utils.EthStandardVerifyDigest(signature, ethSignedMessageHash, validatorAddr.Bytes())
+	err = utils.EthVerifyDigest(signature, ethSignedMessageHash, validatorAddr.Bytes())
 	node1Valid = (err == nil)
 
 	// Node 2: Verify same signature
 	var node2Valid bool
-	err = utils.EthStandardVerifyDigest(signature, ethSignedMessageHash, validatorAddr.Bytes())
+	err = utils.EthVerifyDigest(signature, ethSignedMessageHash, validatorAddr.Bytes())
 	node2Valid = (err == nil)
 
 	// CRITICAL VERIFICATION: Both nodes agree on signature validity
@@ -257,11 +257,11 @@ func TestCrossNodeSignatureVerification(t *testing.T) {
 	invalidSignature[0] ^= 0xFF // Corrupt first byte
 
 	// Node 1: Verify invalid signature
-	err = utils.EthStandardVerifyDigest(invalidSignature, ethSignedMessageHash, validatorAddr.Bytes())
+	err = utils.EthVerifyDigest(invalidSignature, ethSignedMessageHash, validatorAddr.Bytes())
 	node1Valid = (err == nil)
 
 	// Node 2: Verify invalid signature
-	err = utils.EthStandardVerifyDigest(invalidSignature, ethSignedMessageHash, validatorAddr.Bytes())
+	err = utils.EthVerifyDigest(invalidSignature, ethSignedMessageHash, validatorAddr.Bytes())
 	node2Valid = (err == nil)
 
 	// CRITICAL VERIFICATION: Both nodes reject invalid signature
