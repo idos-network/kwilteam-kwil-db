@@ -154,9 +154,9 @@ type EventKVReader interface {
 
 // ListenerStatus is the sync status of one EVM listener (topic, chain, last processed block).
 type ListenerStatus struct {
-	Topic               string
-	Chain               string
-	LastProcessedBlock  int64
+	Topic              string
+	Chain              string
+	LastProcessedBlock int64
 }
 
 // listenerTopics returns a snapshot of registered listener topics and their chain names.

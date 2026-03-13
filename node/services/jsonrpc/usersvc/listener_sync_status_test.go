@@ -59,7 +59,9 @@ func TestListenerSyncStatus_withEventStore_success(t *testing.T) {
 	err := evmsync.EventSyncer.RegisterNewListener(evmsync.EVMEventListenerConfig{
 		UniqueName: topic,
 		Chain:      chains.ArbitrumOne,
-		GetLogs:    func(context.Context, *ethclient.Client, uint64, uint64, log.Logger) ([]*evmsync.EthLog, error) { return nil, nil },
+		GetLogs: func(context.Context, *ethclient.Client, uint64, uint64, log.Logger) ([]*evmsync.EthLog, error) {
+			return nil, nil
+		},
 	})
 	require.NoError(t, err)
 	defer func() { _ = evmsync.EventSyncer.UnregisterListener(topic) }()
@@ -97,7 +99,9 @@ func TestListenerSyncStatus_withEventStore_error(t *testing.T) {
 	err := evmsync.EventSyncer.RegisterNewListener(evmsync.EVMEventListenerConfig{
 		UniqueName: topic,
 		Chain:      chains.ArbitrumOne,
-		GetLogs:    func(context.Context, *ethclient.Client, uint64, uint64, log.Logger) ([]*evmsync.EthLog, error) { return nil, nil },
+		GetLogs: func(context.Context, *ethclient.Client, uint64, uint64, log.Logger) ([]*evmsync.EthLog, error) {
+			return nil, nil
+		},
 	})
 	require.NoError(t, err)
 	defer func() { _ = evmsync.EventSyncer.UnregisterListener(topic) }()
