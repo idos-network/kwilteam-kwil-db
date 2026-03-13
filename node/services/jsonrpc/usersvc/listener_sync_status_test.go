@@ -117,5 +117,5 @@ func TestListenerSyncStatus_withEventStore_error(t *testing.T) {
 
 	require.NotNil(t, jsonErr)
 	require.Nil(t, resp)
-	require.Contains(t, jsonErr.Message, "kv get failed")
+	require.Equal(t, "internal server error", jsonErr.Message)
 }

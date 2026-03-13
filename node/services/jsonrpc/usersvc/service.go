@@ -1144,7 +1144,7 @@ func (svc *Service) ListenerSyncStatus(ctx context.Context, _ *userjson.Listener
 	statuses, err := evmsync.GetListenerSyncStatus(ctx, &kvReaderAdapter{kv})
 	if err != nil {
 		svc.log.Error("listener sync status", "error", err)
-		return nil, jsonrpc.NewError(jsonrpc.ErrorNodeInternal, err.Error(), nil)
+		return nil, jsonrpc.NewError(jsonrpc.ErrorNodeInternal, "internal server error", nil)
 	}
 	entries := make([]userjson.ListenerStatusEntry, len(statuses))
 	for i := range statuses {
