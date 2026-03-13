@@ -2507,7 +2507,7 @@ func (s *schemaVisitor) validateVariableIdentifier(i antlr.ParserRuleContext, st
 	}
 }
 
-// pg max is 63, but we use 64 to support existing long identifiers.
+// pg max is 63
 var maxIdentifierLength = 60
 
 // createDefaultValueFromLiteral creates a DefaultValue from a literal value.
