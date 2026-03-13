@@ -653,8 +653,12 @@ func (cfg ERC20BridgeConfig) Validate() error {
 	}
 
 	for chain, startBlock := range cfg.StartBlock {
-		if err := chains.Chain(strings.ToLower(chain)).Valid(); err != nil {
-			return fmt.Errorf("erc20_bridge.start_block: unknown chain %q", chain)
+		canonical := chains.Chain(strings.ToLower(chain))
+		if err := canonical.Valid(); err != nil {
+			return fmt.Errorf("erc20_bridge.start_block: invalid chain %q", chain)
+		}
+		if canonical.String() != chain {
+			return fmt.Errorf("erc20_bridge.start_block: use canonical chain name %q instead of %q", canonical.String(), chain)
 		}
 
 		n, err := strconv.ParseInt(startBlock, 10, 64)
@@ -663,6 +667,24 @@ func (cfg ERC20BridgeConfig) Validate() error {
 		}
 		if n < 0 {
 			return fmt.Errorf("erc20_bridge.start_block: value for chain %q must be non-negative", chain)
+		}
+	}
+
+	for chain, chunkSize := range cfg.BlockSyncChuckSize {
+		canonical := chains.Chain(strings.ToLower(chain))
+		if err := canonical.Valid(); err != nil {
+			return fmt.Errorf("erc20_bridge.block_sync_chuck_size: invalid chain %q", chain)
+		}
+		if canonical.String() != chain {
+			return fmt.Errorf("erc20_bridge.block_sync_chuck_size: use canonical chain name %q instead of %q", canonical.String(), chain)
+		}
+
+		n, err := strconv.ParseInt(chunkSize, 10, 64)
+		if err != nil {
+			return fmt.Errorf("erc20_bridge.block_sync_chuck_size: invalid value %q for chain %q: %w", chunkSize, chain, err)
+		}
+		if n <= 0 {
+			return fmt.Errorf("erc20_bridge.block_sync_chuck_size: value for chain %q must be greater than 0", chain)
 		}
 	}
 

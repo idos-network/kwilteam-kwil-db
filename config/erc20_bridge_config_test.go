@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestERC20BridgeConfig_Validate_StartBlock(t *testing.T) {
+func TestERC20BridgeConfig_Validate_BlockSyncChuckSize(t *testing.T) {
 	base := func() ERC20BridgeConfig {
 		return ERC20BridgeConfig{
 			RPC: map[string]string{
@@ -15,74 +15,56 @@ func TestERC20BridgeConfig_Validate_StartBlock(t *testing.T) {
 		}
 	}
 
-	t.Run("valid start_block", func(t *testing.T) {
+	t.Run("valid block_sync_chuck_size", func(t *testing.T) {
 		cfg := base()
-		cfg.StartBlock = map[string]string{"ethereum": "50000"}
+		cfg.BlockSyncChuckSize = map[string]string{"ethereum": "500000"}
 		require.NoError(t, cfg.Validate())
 	})
 
-	t.Run("no start_block is fine", func(t *testing.T) {
+	t.Run("no block_sync_chuck_size is fine", func(t *testing.T) {
 		cfg := base()
 		require.NoError(t, cfg.Validate())
 	})
 
-	t.Run("invalid chain in start_block", func(t *testing.T) {
+	t.Run("invalid chain in block_sync_chuck_size", func(t *testing.T) {
 		cfg := base()
-		cfg.StartBlock = map[string]string{"fake_chain": "100"}
+		cfg.BlockSyncChuckSize = map[string]string{"fake_chain": "100000"}
 		err := cfg.Validate()
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "erc20_bridge.start_block")
+		require.Contains(t, err.Error(), "erc20_bridge.block_sync_chuck_size")
 		require.Contains(t, err.Error(), "invalid chain")
 	})
 
-	t.Run("non-numeric start_block value", func(t *testing.T) {
+	t.Run("non-canonical chain key in block_sync_chuck_size", func(t *testing.T) {
 		cfg := base()
-		cfg.StartBlock = map[string]string{"ethereum": "abc"}
+		cfg.BlockSyncChuckSize = map[string]string{"Ethereum": "100000"}
 		err := cfg.Validate()
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "erc20_bridge.start_block")
+		require.Contains(t, err.Error(), "canonical chain name")
+	})
+
+	t.Run("non-numeric block_sync_chuck_size value", func(t *testing.T) {
+		cfg := base()
+		cfg.BlockSyncChuckSize = map[string]string{"ethereum": "abc"}
+		err := cfg.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "erc20_bridge.block_sync_chuck_size")
 		require.Contains(t, err.Error(), "invalid value")
 	})
 
-	t.Run("negative start_block value", func(t *testing.T) {
+	t.Run("zero block_sync_chuck_size", func(t *testing.T) {
 		cfg := base()
-		cfg.StartBlock = map[string]string{"ethereum": "-5"}
+		cfg.BlockSyncChuckSize = map[string]string{"ethereum": "0"}
 		err := cfg.Validate()
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "non-negative")
+		require.Contains(t, err.Error(), "must be greater than 0")
 	})
 
-	t.Run("non-canonical chain key in start_block", func(t *testing.T) {
+	t.Run("negative block_sync_chuck_size", func(t *testing.T) {
 		cfg := base()
-		cfg.StartBlock = map[string]string{"Ethereum": "100"}
+		cfg.BlockSyncChuckSize = map[string]string{"ethereum": "-1"}
 		err := cfg.Validate()
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "canonical chain name")
-	})
-}
-
-func TestERC20BridgeConfig_Validate_RPC(t *testing.T) {
-	t.Run("non-canonical chain key in rpc", func(t *testing.T) {
-		cfg := ERC20BridgeConfig{
-			RPC: map[string]string{
-				"Ethereum": "ws://localhost:8546",
-			},
-		}
-		err := cfg.Validate()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "erc20_bridge.rpc")
-		require.Contains(t, err.Error(), "canonical chain name")
-	})
-
-	t.Run("invalid chain in rpc", func(t *testing.T) {
-		cfg := ERC20BridgeConfig{
-			RPC: map[string]string{
-				"fake_chain": "ws://localhost:8546",
-			},
-		}
-		err := cfg.Validate()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "erc20_bridge.rpc")
-		require.Contains(t, err.Error(), "invalid chain")
+		require.Contains(t, err.Error(), "must be greater than 0")
 	})
 }

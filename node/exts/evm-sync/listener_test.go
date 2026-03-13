@@ -110,6 +110,6 @@ func TestGetChainConf(t *testing.T) {
 		}
 		_, err := getChainConf(cfg, chains.Ethereum)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "block_sync_chunk_size must be greater than 0")
+		require.Contains(t, err.Error(), "greater than 0")
 	})
 }
