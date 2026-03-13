@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -159,12 +160,18 @@ type ListenerStatus struct {
 }
 
 // listenerTopics returns a snapshot of registered listener topics and their chain names.
-// Caller must not hold EventSyncer.mu.
+// Caller must not hold EventSyncer.mu. Order is deterministic (sorted by topic).
 func (l *globalListenerManager) listenerTopics() []struct{ topic, chain string } {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	out := make([]struct{ topic, chain string }, 0, len(l.listeners))
-	for topic, info := range l.listeners {
+	topics := make([]string, 0, len(l.listeners))
+	for topic := range l.listeners {
+		topics = append(topics, topic)
+	}
+	sort.Strings(topics)
+	out := make([]struct{ topic, chain string }, 0, len(topics))
+	for _, topic := range topics {
+		info := l.listeners[topic]
 		out = append(out, struct{ topic, chain string }{topic, string(info.chain.Name)})
 	}
 	return out
