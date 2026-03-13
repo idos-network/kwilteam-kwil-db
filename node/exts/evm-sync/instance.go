@@ -192,8 +192,10 @@ func GetListenerSyncStatus(ctx context.Context, kv EventKVReader) ([]ListenerSta
 			return nil, fmt.Errorf("get last seen height for %s: %w", t.topic, err)
 		}
 		var lastBlock int64
-		if len(val) >= 8 {
+		if len(val) == 8 {
 			lastBlock = int64(binary.LittleEndian.Uint64(val))
+		} else if len(val) != 0 {
+			return nil, fmt.Errorf("last-seen-height for topic %s: invalid value length %d (expected 8 bytes)", t.topic, len(val))
 		}
 		result = append(result, ListenerStatus{
 			Topic:              t.topic,
