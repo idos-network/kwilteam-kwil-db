@@ -17,7 +17,7 @@ This document describes the JSON-RPC services exposed by Kwil nodes: method name
 | Admin RPC | `/tmp/kwild.socket` (default); or `127.0.0.1:8584` if TCP | `admin.listen` | admin, user, function, chain |
 
 - **Path:** `POST /rpc/v1` for all JSON-RPC calls. Params must be a **JSON object** (named params), not an array.
-- **Auth:** User RPC may have challenge/auth for some methods; Admin RPC may require TLS and/or Basic auth (see [node/services/jsonrpc/adminsvc/README.md](node/services/jsonrpc/adminsvc/README.md)).
+- **Auth:** User RPC may have challenge/auth for some methods; Admin RPC may require TLS and/or Basic auth (see [node/services/jsonrpc/adminsvc/README.md](../node/services/jsonrpc/adminsvc/README.md)).
 
 **Generic request shape:**
 
@@ -131,7 +131,7 @@ curl -s -X POST http://localhost:8484/rpc/v1 \
   }'
 ```
 
-**Response (result):** Includes `status` (e.g. `"ready"`, `"claimed"`), `eth_tx_hash` (if claimed), merkle proof, validator signatures. See [node/services/jsonrpc/usersvc/README.md](node/services/jsonrpc/usersvc/README.md) for details.
+**Response (result):** Includes `status` (e.g. `"ready"`, `"claimed"`), `eth_tx_hash` (if claimed), merkle proof, validator signatures. See [node/services/jsonrpc/usersvc/README.md](../node/services/jsonrpc/usersvc/README.md) for details.
 
 ### Example: user.listener_sync_status
 
@@ -157,7 +157,7 @@ curl -s -X POST http://localhost:8484/rpc/v1 \
 }
 ```
 
-Use this on the **user** RPC (port 8484) so it works in production where admin is not exposed. See [node/services/jsonrpc/usersvc/README.md](node/services/jsonrpc/usersvc/README.md) for details.
+Use this on the **user** RPC (port 8484) so it works in production where admin is not exposed. See [node/services/jsonrpc/usersvc/README.md](../node/services/jsonrpc/usersvc/README.md) for details.
 
 ---
 
@@ -318,6 +318,6 @@ curl -s "http://localhost:8484/spec/v1"
 
 ## See also
 
-- [node/services/jsonrpc/usersvc/README.md](node/services/jsonrpc/usersvc/README.md) — User service tests and withdrawal proof usage.
-- [node/services/jsonrpc/adminsvc/README.md](node/services/jsonrpc/adminsvc/README.md) — Admin service.
+- [node/services/jsonrpc/usersvc/README.md](../node/services/jsonrpc/usersvc/README.md) — User service tests and withdrawal proof usage.
+- [node/services/jsonrpc/adminsvc/README.md](../node/services/jsonrpc/adminsvc/README.md) — Admin service.
 - [app/blacklist/TESTING.md](../app/blacklist/TESTING.md) — Blacklist and admin curl examples.
