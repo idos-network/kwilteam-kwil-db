@@ -3,7 +3,7 @@ package validation
 // max name lengths
 const (
 	// postgres limits identifiers to 63
-	MAX_IDENT_NAME_LENGTH = 60
+	MAX_IDENT_NAME_LENGTH = 40
 )
 
 // table restrictions
