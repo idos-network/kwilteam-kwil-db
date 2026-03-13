@@ -255,8 +255,9 @@ const (
 
 // API version log
 //
-// apiVerMinor = 2 indicates the presence of the migration, challenge, and
-// health methods added in Kwil v0.9
+// apiVerMinor = 2: migration, challenge, and health methods (Kwil v0.9).
+// apiVerMinor = 3 (apiVerPatch = 0): user.listener_sync_status for EVM listener
+// sync status (moved from admin RPC so production nodes can expose it).
 
 var (
 	apiVerSemver = fmt.Sprintf("%d.%d.%d", apiVerMajor, apiVerMinor, apiVerPatch)

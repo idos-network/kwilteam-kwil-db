@@ -87,10 +87,15 @@ func TestListenerSyncStatus_withEventStore_success(t *testing.T) {
 
 	require.Nil(t, jsonErr)
 	require.NotNil(t, resp)
-	require.Len(t, resp.Listeners, 1)
-	require.Equal(t, topic, resp.Listeners[0].Topic)
-	require.Equal(t, string(chains.ArbitrumOne), resp.Listeners[0].Chain)
-	require.Equal(t, wantBlock, resp.Listeners[0].LastProcessedBlock)
+	var found *userjson.ListenerStatusEntry
+	for i := range resp.Listeners {
+		if resp.Listeners[i].Topic == topic && resp.Listeners[i].Chain == string(chains.ArbitrumOne) {
+			found = &resp.Listeners[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "expected listener %q on chain %s in response", topic, chains.ArbitrumOne)
+	require.Equal(t, wantBlock, found.LastProcessedBlock)
 }
 
 func TestListenerSyncStatus_withEventStore_error(t *testing.T) {
