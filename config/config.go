@@ -380,9 +380,10 @@ func DefaultConfig() *Config {
 			Hash:   "",
 		},
 		Erc20Bridge: ERC20BridgeConfig{
-			RPC:                make(map[string]string),
-			BlockSyncChuckSize: make(map[string]string),
-			Signer:             make(map[string]string),
+			RPC:                    make(map[string]string),
+			BlockSyncChuckSize:     make(map[string]string),
+			Signer:                 make(map[string]string),
+			EnableNonCustodialBridges: false,
 		},
 		SkipDependencyVerification: false,
 		PGDumpPath:                 "pg_dump",
@@ -614,10 +615,11 @@ type Checkpoint struct {
 }
 
 type ERC20BridgeConfig struct {
-	RPC                map[string]string `toml:"rpc" comment:"evm websocket RPC; format: chain_name='rpc_url'"`
-	BlockSyncChuckSize map[string]string `toml:"block_sync_chuck_size" comment:"rpc option block sync chunk size; format: chain_name='chunk_size'"`
-	Signer             map[string]string `toml:"signer" comment:"signer service configuration; format: ext_alias='file_path_to_private_key'"`
-	StartBlock         map[string]string `toml:"start_block" comment:"starting block number for sync; format: chain_name='block_number'. Used when eventstore has no last seen height."`
+	RPC                    map[string]string `toml:"rpc" comment:"evm websocket RPC; format: chain_name='rpc_url'"`
+	BlockSyncChuckSize     map[string]string `toml:"block_sync_chuck_size" comment:"rpc option block sync chunk size; format: chain_name='chunk_size'"`
+	Signer                 map[string]string `toml:"signer" comment:"signer service configuration; format: ext_alias='file_path_to_private_key'"`
+	StartBlock             map[string]string `toml:"start_block" comment:"starting block number for sync; format: chain_name='block_number'. Used when eventstore has no last seen height."`
+	EnableNonCustodialBridges bool `toml:"enable_non_custodial_bridges" comment:"if true, enable non-custodial bridge behavior (withdrawal listeners, validator signer); set false when all instances are custodial (Gnosis Safe)"`
 }
 
 // Validate validates the bridge general config, other validations will be performed

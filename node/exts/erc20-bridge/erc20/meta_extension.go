@@ -477,8 +477,8 @@ func init() {
 						getSingleton().instances.Set(*instance.ID, instance)
 					}
 
-					// Start validator signer services for non-custodial instances only (custodial/Gnosis Safe escrows use multisig, not in-node signer)
-					if app.Service.LocalConfig != nil {
+					// Start validator signer services for non-custodial instances only (when enable_non_custodial_bridges is true)
+					if app.Service.LocalConfig != nil && app.Service.LocalConfig.Erc20Bridge.EnableNonCustodialBridges {
 						for _, instance := range instances {
 							if !instance.active || !instance.synced {
 								continue
@@ -3144,18 +3144,22 @@ func isInstanceCustodial(app *common.App, instance *rewardExtensionInfo) (bool, 
 	return custodial, nil
 }
 
-// shouldStartWithdrawalListener returns true if the instance is non-custodial and has RPC
-// configured, so the withdrawal listener should be started. Custodial (Gnosis Safe) instances
-// confirm withdrawals on-chain via the Safe; only non-custodial contracts need the listener.
+// shouldStartWithdrawalListener returns true if the withdrawal listener should be started for this instance.
+// Uses config only (no RPC) so it is safe to call from consensus paths (state poll resolution, prepare action).
+// Set erc20_bridge.enable_non_custodial_bridges = true when you have non-custodial instances.
 func shouldStartWithdrawalListener(app *common.App, instance *rewardExtensionInfo) bool {
-	custodial, err := isInstanceCustodial(app, instance)
-	if err != nil {
-		if app.Service != nil && app.Service.Logger != nil {
-			app.Service.Logger.Debugf("skip withdrawal listener for instance %s (escrow check failed: %v)", instance.ID, err)
-		}
+	if app.Service == nil || app.Service.LocalConfig == nil {
 		return false
 	}
-	return !custodial
+	if !app.Service.LocalConfig.Erc20Bridge.EnableNonCustodialBridges {
+		return false
+	}
+	chainName := strings.ToLower(instance.ChainInfo.Name.String())
+	rpc, hasRPC := app.Service.LocalConfig.Erc20Bridge.RPC[chainName]
+	if !hasRPC || rpc == "" {
+		return false
+	}
+	return true
 }
 
 // getValidatorSigner returns a ValidatorSigner wrapper for the node's validator key.
