@@ -23,5 +23,6 @@ func TestListenerSyncStatus_nilEventStore(t *testing.T) {
 
 	require.Nil(t, jsonErr)
 	require.NotNil(t, resp)
-	require.Nil(t, resp.Listeners)
+	require.NotNil(t, resp.Listeners)
+	require.Empty(t, resp.Listeners)
 }

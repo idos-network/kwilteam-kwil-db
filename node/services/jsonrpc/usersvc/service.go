@@ -1093,7 +1093,7 @@ func (svc *Service) CallChallenge(ctx context.Context, req *userjson.ChallengeRe
 // ListenerSyncStatus returns the last processed block for each registered EVM listener.
 func (svc *Service) ListenerSyncStatus(ctx context.Context, _ *userjson.ListenerSyncStatusRequest) (*userjson.ListenerSyncStatusResponse, *jsonrpc.Error) {
 	if svc.eventStore == nil {
-		return &userjson.ListenerSyncStatusResponse{Listeners: nil}, nil
+		return &userjson.ListenerSyncStatusResponse{Listeners: []userjson.ListenerStatusEntry{}}, nil
 	}
 	kv := svc.eventStore.KV([]byte("evm_sync "))
 	statuses, err := evmsync.GetListenerSyncStatus(ctx, kv)
