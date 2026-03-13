@@ -375,8 +375,6 @@ func init() {
 					}
 					return withdrawalErr
 				}
-			} else if app.Service != nil && app.Service.Logger != nil {
-				app.Service.Logger.Infof("instance %s is custodial (Gnosis Safe), not starting withdrawal listener", info.ID)
 			}
 			return nil
 		}
@@ -463,8 +461,6 @@ func init() {
 										}
 										return withdrawalErr
 									}
-								} else if app.Service != nil && app.Service.Logger != nil {
-									app.Service.Logger.Infof("instance %s is custodial (Gnosis Safe), not starting withdrawal listener", instance.ID)
 								}
 							} else {
 								err = instance.startStatePoller()
@@ -651,8 +647,6 @@ func init() {
 											}
 											return withdrawalErr
 										}
-									} else if app.Service != nil && app.Service.Logger != nil {
-										app.Service.Logger.Infof("instance %s is custodial (Gnosis Safe), not starting withdrawal listener", info.ID)
 									}
 
 									return resultFn([]any{id})
@@ -3152,11 +3146,17 @@ func shouldStartWithdrawalListener(app *common.App, instance *rewardExtensionInf
 		return false
 	}
 	if !app.Service.LocalConfig.Erc20Bridge.EnableNonCustodialBridges {
+		if app.Service.Logger != nil {
+			app.Service.Logger.Infof("skipping withdrawal listener: non-custodial bridges disabled in config (instance %s)", instance.ID)
+		}
 		return false
 	}
 	chainName := strings.ToLower(instance.ChainInfo.Name.String())
 	rpc, hasRPC := app.Service.LocalConfig.Erc20Bridge.RPC[chainName]
 	if !hasRPC || rpc == "" {
+		if app.Service.Logger != nil {
+			app.Service.Logger.Infof("skipping withdrawal listener: no RPC configured for chain %s (instance %s)", chainName, instance.ID)
+		}
 		return false
 	}
 	return true
