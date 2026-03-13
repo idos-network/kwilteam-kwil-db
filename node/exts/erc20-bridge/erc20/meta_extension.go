@@ -526,7 +526,7 @@ func init() {
 								continue
 							}
 							if signer != nil {
-								signerCtx, cancel := context.WithCancel(context.Background())
+								signerCtx, cancel := context.WithCancel(ctx)
 								runningSignersMu.Lock()
 								runningSignerCancels[instanceIDStr] = cancel
 								runningSignersMu.Unlock()
