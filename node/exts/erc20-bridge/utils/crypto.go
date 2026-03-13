@@ -152,11 +152,11 @@ func IsGnosisStyleSignature(sig []byte) bool {
 	return v == 31 || v == 32
 }
 
-// EthStandardVerifyDigest verifies an Ethereum signature (V=27/28 or 31/32).
+// EthVerifyDigest verifies an Ethereum signature (V=27/28 or 31/32).
 // Accepts both standard personal_sign (V=27 or 28) and Gnosis Safe style (V=31 or 32).
 // This avoids rejecting custodial Safe votes when Safe nonce is 0 (first tx), since
 // the bridge signer produces Gnosis-style V for Safe tx hashes.
-func EthStandardVerifyDigest(sig []byte, digest []byte, address []byte) error {
+func EthVerifyDigest(sig []byte, digest []byte, address []byte) error {
 	// signature is 65 bytes, [R || S || V] format
 	if len(sig) != ethCrypto.SignatureLength {
 		return fmt.Errorf("invalid signature length: expected %d, received %d",
