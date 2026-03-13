@@ -14,7 +14,7 @@ This document describes the JSON-RPC services exposed by Kwil nodes: method name
 | Server   | Default address        | Config key    | Services exposed                          |
 |----------|------------------------|---------------|-------------------------------------------|
 | User RPC | `0.0.0.0:8484`         | `rpc.listen`  | user, function, chain (each can be disabled) |
-| Admin RPC| `127.0.0.1:8584` or socket | `admin.listen` | admin, user, function, chain            |
+| Admin RPC | `/tmp/kwild.socket` (default); or `127.0.0.1:8584` if TCP | `admin.listen` | admin, user, function, chain |
 
 - **Path:** `POST /rpc/v1` for all JSON-RPC calls. Params must be a **JSON object** (named params), not an array.
 - **Auth:** User RPC may have challenge/auth for some methods; Admin RPC may require TLS and/or Basic auth (see [node/services/jsonrpc/adminsvc/README.md](node/services/jsonrpc/adminsvc/README.md)).
