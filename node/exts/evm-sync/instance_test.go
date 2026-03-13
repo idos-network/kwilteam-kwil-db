@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -260,6 +261,10 @@ func (m *mockEventKVReader) Get(ctx context.Context, key []byte) ([]byte, error)
 	return nil, nil
 }
 
+// TestGetListenerSyncStatus exercises GetListenerSyncStatus with the package-level
+// EventSyncer. These subtests must not run in parallel (do not call t.Parallel());
+// they register/unregister listeners on the singleton and use unique topic names
+// per subtest to isolate state.
 func TestGetListenerSyncStatus(t *testing.T) {
 	ctx := context.Background()
 
@@ -272,7 +277,7 @@ func TestGetListenerSyncStatus(t *testing.T) {
 	})
 
 	t.Run("one_listener_with_block", func(t *testing.T) {
-		topic := "test_listener_sync_status_xyz"
+		topic := "test_listener_" + strings.ReplaceAll(t.Name(), "/", "_")
 		err := EventSyncer.RegisterNewListener(EVMEventListenerConfig{
 			UniqueName: topic,
 			Chain:      chains.ArbitrumOne,
@@ -304,7 +309,7 @@ func TestGetListenerSyncStatus(t *testing.T) {
 	})
 
 	t.Run("kv_get_error", func(t *testing.T) {
-		topic := "test_listener_kv_error"
+		topic := "test_listener_" + strings.ReplaceAll(t.Name(), "/", "_")
 		err := EventSyncer.RegisterNewListener(EVMEventListenerConfig{
 			UniqueName: topic,
 			Chain:      chains.ArbitrumOne,
