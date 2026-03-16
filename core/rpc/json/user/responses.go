@@ -127,4 +127,11 @@ type ListenerStatusEntry struct {
 	Topic              string `json:"topic"`
 	Chain              string `json:"chain"`
 	LastProcessedBlock int64  `json:"last_processed_block"`
+	// EscrowAddress is the escrow contract address (hex with 0x) when this listener
+	// is an erc20-bridge listener (topic name erc20_transfer_listener_<uuid> or
+	// erc20_withdrawal_listener_<uuid>); empty otherwise.
+	EscrowAddress string `json:"escrow_address,omitempty"`
+	// Erc20Address is the synced ERC20 token address (hex with 0x) from reward_instances;
+	// empty if not an erc20-bridge listener or not yet synced.
+	Erc20Address string `json:"erc20_address,omitempty"`
 }

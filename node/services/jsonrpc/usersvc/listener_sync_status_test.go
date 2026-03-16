@@ -11,11 +11,62 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/trufnetwork/kwil-db/core/log"
 	userjson "github.com/trufnetwork/kwil-db/core/rpc/json/user"
+	"github.com/trufnetwork/kwil-db/core/types"
 	evmsync "github.com/trufnetwork/kwil-db/node/exts/evm-sync"
 	"github.com/trufnetwork/kwil-db/node/exts/evm-sync/chains"
 )
 
 // For curl examples and usage of user.listener_sync_status, see README.md in this directory.
+
+func TestListenerSyncStatusEscrowInstanceID(t *testing.T) {
+	validUUID := "043a5968-975c-5f49-b0ed-816a74f761a0"
+	parsedValid, err := types.ParseUUID(validUUID)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		topic    string
+		wantID   types.UUID
+		wantOK   bool
+	}{
+		{
+			name:   "transfer_listener_valid",
+			topic:  erc20TransferListenerPrefix + validUUID,
+			wantID: *parsedValid,
+			wantOK: true,
+		},
+		{
+			name:   "withdrawal_listener_valid",
+			topic:  erc20WithdrawalListenerPrefix + validUUID,
+			wantID: *parsedValid,
+			wantOK: true,
+		},
+		{
+			name:   "non_erc20_topic",
+			topic:  "test_listener_sync_svc_success",
+			wantOK: false,
+		},
+		{
+			name:   "transfer_prefix_invalid_uuid",
+			topic:  erc20TransferListenerPrefix + "not-a-uuid",
+			wantOK: false,
+		},
+		{
+			name:   "empty_suffix",
+			topic:  erc20TransferListenerPrefix,
+			wantOK: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotID, gotOK := listenerSyncStatusEscrowInstanceID(tt.topic)
+			require.Equal(t, tt.wantOK, gotOK)
+			if tt.wantOK {
+				require.Equal(t, tt.wantID, gotID)
+			}
+		})
+	}
+}
 
 func TestListenerSyncStatus_nilEventStore(t *testing.T) {
 	svc := &Service{

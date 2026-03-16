@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1136,6 +1137,31 @@ func (svc *Service) CallChallenge(ctx context.Context, req *userjson.ChallengeRe
 	}, nil
 }
 
+// erc20-bridge listener topic name prefixes (must match node/exts/erc20-bridge/erc20).
+const (
+	erc20TransferListenerPrefix   = "erc20_transfer_listener_"
+	erc20WithdrawalListenerPrefix = "erc20_withdrawal_listener_"
+)
+
+// listenerSyncStatusEscrowInstanceID extracts reward_instances.id from an erc20-bridge
+// listener topic name; ok is false if the topic is not an erc20 transfer/withdrawal listener.
+func listenerSyncStatusEscrowInstanceID(topic string) (id types.UUID, ok bool) {
+	var suffix string
+	switch {
+	case strings.HasPrefix(topic, erc20TransferListenerPrefix):
+		suffix = strings.TrimPrefix(topic, erc20TransferListenerPrefix)
+	case strings.HasPrefix(topic, erc20WithdrawalListenerPrefix):
+		suffix = strings.TrimPrefix(topic, erc20WithdrawalListenerPrefix)
+	default:
+		return types.UUID{}, false
+	}
+	parsed, err := types.ParseUUID(suffix)
+	if err != nil {
+		return types.UUID{}, false
+	}
+	return *parsed, true
+}
+
 // ListenerSyncStatus returns the last processed block for each registered EVM listener.
 func (svc *Service) ListenerSyncStatus(ctx context.Context, _ *userjson.ListenerSyncStatusRequest) (*userjson.ListenerSyncStatusResponse, *jsonrpc.Error) {
 	if svc.eventStore == nil {
@@ -1155,7 +1181,104 @@ func (svc *Service) ListenerSyncStatus(ctx context.Context, _ *userjson.Listener
 			LastProcessedBlock: statuses[i].LastProcessedBlock,
 		}
 	}
+	// Enrich erc20-bridge listeners with escrow_address from kwil_erc20_meta.reward_instances.
+	if err := svc.enrichListenerSyncStatusEscrow(ctx, entries); err != nil {
+		svc.log.Debug("listener sync status: could not enrich escrow addresses", "error", err)
+		// non-fatal: return entries without escrow_address
+	}
 	return &userjson.ListenerSyncStatusResponse{Listeners: entries}, nil
+}
+
+// enrichListenerSyncStatusEscrow sets EscrowAddress on entries whose topic is an
+// erc20-bridge listener by querying kwil_erc20_meta.reward_instances (one DB call).
+func (svc *Service) enrichListenerSyncStatusEscrow(ctx context.Context, entries []userjson.ListenerStatusEntry) error {
+	if svc.db == nil || svc.engine == nil {
+		return nil
+	}
+	// Single pass: collect (entry index, instanceID) for erc20-bridge listeners.
+	type erc20Entry struct {
+		idx int
+		id  types.UUID
+	}
+	var erc20Entries []erc20Entry
+	for i := range entries {
+		instanceID, ok := listenerSyncStatusEscrowInstanceID(entries[i].Topic)
+		if !ok {
+			continue
+		}
+		erc20Entries = append(erc20Entries, erc20Entry{idx: i, id: instanceID})
+	}
+	if len(erc20Entries) == 0 {
+		return nil
+	}
+	// Unique instance IDs for the query (one row per instance, not per listener).
+	seen := make(map[types.UUID]struct{}, len(erc20Entries))
+	var ids []types.UUID
+	for _, e := range erc20Entries {
+		if _, ok := seen[e.id]; !ok {
+			seen[e.id] = struct{}{}
+			ids = append(ids, e.id)
+		}
+	}
+
+	readTx, err := svc.db.BeginReadTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer readTx.Rollback(ctx)
+
+	// Build SELECT id, escrow_address, erc20_address FROM reward_instances WHERE id IN ($id0, $id1, ...)
+	params := make(map[string]any, len(ids))
+	inPlaceholders := make([]string, len(ids))
+	for j := range ids {
+		key := fmt.Sprintf("id%d", j)
+		inPlaceholders[j] = "$" + key
+		params[key] = &ids[j]
+	}
+	query := `{kwil_erc20_meta}SELECT id, escrow_address, erc20_address FROM reward_instances WHERE id IN (` + strings.Join(inPlaceholders, ", ") + `)`
+
+	type rewardInstanceMeta struct {
+		escrow  []byte
+		erc20   []byte
+	}
+	metaByID := make(map[types.UUID]rewardInstanceMeta, len(ids))
+	engineCtx := &common.EngineContext{TxContext: &common.TxContext{Ctx: ctx}}
+	err = svc.engine.Execute(engineCtx, readTx, query, params, func(row *common.Row) error {
+		if len(row.Values) != 3 {
+			return fmt.Errorf("expected 3 columns, got %d", len(row.Values))
+		}
+		id, ok := row.Values[0].(*types.UUID)
+		if !ok {
+			return fmt.Errorf("id column type %T", row.Values[0])
+		}
+		escrow, ok := row.Values[1].([]byte)
+		if !ok {
+			return fmt.Errorf("escrow_address type %T", row.Values[1])
+		}
+		var erc20 []byte
+		if row.Values[2] != nil {
+			erc20, ok = row.Values[2].([]byte)
+			if !ok {
+				return fmt.Errorf("erc20_address type %T", row.Values[2])
+			}
+		}
+		metaByID[*id] = rewardInstanceMeta{escrow: escrow, erc20: erc20}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, e := range erc20Entries {
+		meta := metaByID[e.id]
+		if len(meta.escrow) > 0 {
+			entries[e.idx].EscrowAddress = "0x" + hex.EncodeToString(meta.escrow)
+		}
+		if len(meta.erc20) > 0 {
+			entries[e.idx].Erc20Address = "0x" + hex.EncodeToString(meta.erc20)
+		}
+	}
+	return nil
 }
 
 // GetWithdrawalProof retrieves the merkle proof and validator signatures for a withdrawal.
