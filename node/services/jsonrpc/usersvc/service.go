@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	nodeConsensus "github.com/trufnetwork/kwil-db/node/consensus"
 	"github.com/trufnetwork/kwil-db/node/engine"
 	bridgeUtils "github.com/trufnetwork/kwil-db/node/exts/erc20-bridge/utils"
+	evmsync "github.com/trufnetwork/kwil-db/node/exts/evm-sync"
 	"github.com/trufnetwork/kwil-db/node/metrics"
 	"github.com/trufnetwork/kwil-db/node/migrations"
 	rpcserver "github.com/trufnetwork/kwil-db/node/services/jsonrpc"
@@ -69,6 +71,51 @@ type Migrator interface {
 	GetGenesisSnapshotChunk(chunkIdx uint32) ([]byte, error)
 }
 
+// listenerSyncEventStore provides KV access for listener sync status.
+// Use WrapListenerSyncEventStore to adapt *voting.EventStore.
+type listenerSyncEventStore interface {
+	KV(prefix []byte) ListenerSyncKVReader
+}
+
+// ListenerSyncKVReader is the KV view used for listener sync. *voting.KV implements it.
+// Callers that cannot depend on voting (e.g. app/node to avoid interface satisfaction across packages)
+// can implement this via an adapter that delegates to *voting.KV.
+type ListenerSyncKVReader interface {
+	Get(ctx context.Context, key []byte) ([]byte, error)
+}
+
+// WrapListenerSyncEventStore adapts *voting.EventStore to listenerSyncEventStore.
+func WrapListenerSyncEventStore(es *voting.EventStore) listenerSyncEventStore {
+	if es == nil {
+		return nil
+	}
+	return &listenerSyncEventStoreWrap{es: es}
+}
+
+type listenerSyncEventStoreWrap struct {
+	es *voting.EventStore
+}
+
+func (w *listenerSyncEventStoreWrap) KV(prefix []byte) ListenerSyncKVReader {
+	return (*votingKVReader)(w.es.KV(prefix))
+}
+
+// votingKVReader adapts *voting.KV to ListenerSyncKVReader (same package, so *voting.KV can be used).
+type votingKVReader voting.KV
+
+func (r *votingKVReader) Get(ctx context.Context, key []byte) ([]byte, error) {
+	return (*voting.KV)(r).Get(ctx, key)
+}
+
+// kvReaderAdapter adapts ListenerSyncKVReader to evmsync.EventKVReader.
+type kvReaderAdapter struct{ ListenerSyncKVReader }
+
+func (a *kvReaderAdapter) Get(ctx context.Context, key []byte) ([]byte, error) {
+	return a.ListenerSyncKVReader.Get(ctx, key)
+}
+
+var _ evmsync.EventKVReader = (*kvReaderAdapter)(nil)
+
 var _ metrics.RPCMetrics = metrics.RPC // var mets, when needed
 
 // Service is the "user" RPC service, also known as txsvc in other contexts.
@@ -85,6 +132,7 @@ type Service struct {
 	chainClient BlockchainTransactor
 	validators  Validators
 	migrator    Migrator
+	eventStore  listenerSyncEventStore // optional; for listener_sync_status
 
 	// challenges issued to the clients
 	challengeMtx     sync.Mutex
@@ -148,8 +196,9 @@ const (
 )
 
 // NewService creates a new instance of the user RPC service.
+// eventStore may be nil; if set, ListenerSyncStatus will return EVM listener sync status.
 func NewService(db DB, engine EngineReader, chainClient BlockchainTransactor,
-	nodeApp NodeApp, vals Validators, migrator Migrator, logger log.Logger, opts ...Opt) *Service {
+	nodeApp NodeApp, vals Validators, migrator Migrator, logger log.Logger, eventStore listenerSyncEventStore, opts ...Opt) *Service {
 	cfg := &serviceCfg{
 		readTxTimeout:      defaultReadTxTimeout,
 		challengeExpiry:    defaultChallengeExpiry,
@@ -170,6 +219,7 @@ func NewService(db DB, engine EngineReader, chainClient BlockchainTransactor,
 		validators:       vals,
 		db:               db,
 		migrator:         migrator,
+		eventStore:       eventStore,
 		privateMode:      cfg.privateMode,
 		challengeExpiry:  cfg.challengeExpiry,
 		challenges:       make(map[[32]byte]time.Time),
@@ -198,7 +248,7 @@ func NewService(db DB, engine EngineReader, chainClient BlockchainTransactor,
 // or any other breaking changes.
 const (
 	apiVerMajor = 0
-	apiVerMinor = 2
+	apiVerMinor = 3
 	apiVerPatch = 0
 
 	serviceName = "user"
@@ -206,8 +256,9 @@ const (
 
 // API version log
 //
-// apiVerMinor = 2 indicates the presence of the migration, challenge, and
-// health methods added in Kwil v0.9
+// apiVerMinor = 2: migration, challenge, and health methods (Kwil v0.9).
+// apiVerMinor = 3 (apiVerPatch = 0): user.listener_sync_status for EVM listener
+// sync status (moved from admin RPC so production nodes can expose it).
 
 var (
 	apiVerSemver = fmt.Sprintf("%d.%d.%d", apiVerMajor, apiVerMinor, apiVerPatch)
@@ -396,6 +447,12 @@ func (svc *Service) Methods() map[jsonrpc.Method]rpcserver.MethodDef {
 		userjson.MethodGetWithdrawalProof: rpcserver.MakeMethodDef(svc.GetWithdrawalProof,
 			"get withdrawal proof and validator signatures for an epoch",
 			"merkle proof, validator signatures, and withdrawal status",
+		),
+
+		// Listener sync status (EVM listeners last processed block; for health monitoring)
+		userjson.MethodListenerSyncStatus: rpcserver.MakeMethodDef(svc.ListenerSyncStatus,
+			"return last processed block per EVM listener",
+			"list of listeners with topic, chain, last_processed_block",
 		),
 	}
 }
@@ -1078,6 +1135,150 @@ func (svc *Service) CallChallenge(ctx context.Context, req *userjson.ChallengeRe
 	return &userjson.ChallengeResponse{
 		Challenge: challenge[:],
 	}, nil
+}
+
+// erc20-bridge listener topic name prefixes (must match node/exts/erc20-bridge/erc20).
+const (
+	erc20TransferListenerPrefix   = "erc20_transfer_listener_"
+	erc20WithdrawalListenerPrefix = "erc20_withdrawal_listener_"
+)
+
+// listenerSyncStatusEscrowInstanceID extracts reward_instances.id from an erc20-bridge
+// listener topic name; ok is false if the topic is not an erc20 transfer/withdrawal listener.
+func listenerSyncStatusEscrowInstanceID(topic string) (id types.UUID, ok bool) {
+	var suffix string
+	switch {
+	case strings.HasPrefix(topic, erc20TransferListenerPrefix):
+		suffix = strings.TrimPrefix(topic, erc20TransferListenerPrefix)
+	case strings.HasPrefix(topic, erc20WithdrawalListenerPrefix):
+		suffix = strings.TrimPrefix(topic, erc20WithdrawalListenerPrefix)
+	default:
+		return types.UUID{}, false
+	}
+	parsed, err := types.ParseUUID(suffix)
+	if err != nil {
+		return types.UUID{}, false
+	}
+	return *parsed, true
+}
+
+// ListenerSyncStatus returns the last processed block for each registered EVM listener.
+func (svc *Service) ListenerSyncStatus(ctx context.Context, _ *userjson.ListenerSyncStatusRequest) (*userjson.ListenerSyncStatusResponse, *jsonrpc.Error) {
+	if svc.eventStore == nil {
+		return &userjson.ListenerSyncStatusResponse{Listeners: []userjson.ListenerStatusEntry{}}, nil
+	}
+	kv := svc.eventStore.KV([]byte("evm_sync "))
+	statuses, err := evmsync.GetListenerSyncStatus(ctx, &kvReaderAdapter{kv})
+	if err != nil {
+		svc.log.Error("listener sync status", "error", err)
+		return nil, jsonrpc.NewError(jsonrpc.ErrorNodeInternal, "internal server error", nil)
+	}
+	entries := make([]userjson.ListenerStatusEntry, len(statuses))
+	for i := range statuses {
+		entries[i] = userjson.ListenerStatusEntry{
+			Topic:              statuses[i].Topic,
+			Chain:              statuses[i].Chain,
+			LastProcessedBlock: statuses[i].LastProcessedBlock,
+		}
+	}
+	// Enrich erc20-bridge listeners with escrow_address from kwil_erc20_meta.reward_instances.
+	if err := svc.enrichListenerSyncStatusEscrow(ctx, entries); err != nil {
+		svc.log.Debug("listener sync status: could not enrich escrow addresses", "error", err)
+		// non-fatal: return entries without escrow_address
+	}
+	return &userjson.ListenerSyncStatusResponse{Listeners: entries}, nil
+}
+
+// enrichListenerSyncStatusEscrow sets EscrowAddress on entries whose topic is an
+// erc20-bridge listener by querying kwil_erc20_meta.reward_instances (one DB call).
+func (svc *Service) enrichListenerSyncStatusEscrow(ctx context.Context, entries []userjson.ListenerStatusEntry) error {
+	if svc.db == nil || svc.engine == nil {
+		return nil
+	}
+	// Single pass: collect (entry index, instanceID) for erc20-bridge listeners.
+	type erc20Entry struct {
+		idx int
+		id  types.UUID
+	}
+	var erc20Entries []erc20Entry
+	for i := range entries {
+		instanceID, ok := listenerSyncStatusEscrowInstanceID(entries[i].Topic)
+		if !ok {
+			continue
+		}
+		erc20Entries = append(erc20Entries, erc20Entry{idx: i, id: instanceID})
+	}
+	if len(erc20Entries) == 0 {
+		return nil
+	}
+	// Unique instance IDs for the query (one row per instance, not per listener).
+	seen := make(map[types.UUID]struct{}, len(erc20Entries))
+	var ids []types.UUID
+	for _, e := range erc20Entries {
+		if _, ok := seen[e.id]; !ok {
+			seen[e.id] = struct{}{}
+			ids = append(ids, e.id)
+		}
+	}
+
+	readTx, err := svc.db.BeginReadTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer readTx.Rollback(ctx)
+
+	// Build SELECT id, escrow_address, erc20_address FROM reward_instances WHERE id IN ($id0, $id1, ...)
+	params := make(map[string]any, len(ids))
+	inPlaceholders := make([]string, len(ids))
+	for j := range ids {
+		key := fmt.Sprintf("id%d", j)
+		inPlaceholders[j] = "$" + key
+		params[key] = &ids[j]
+	}
+	query := `{kwil_erc20_meta}SELECT id, escrow_address, erc20_address FROM reward_instances WHERE id IN (` + strings.Join(inPlaceholders, ", ") + `)`
+
+	type rewardInstanceMeta struct {
+		escrow []byte
+		erc20  []byte
+	}
+	metaByID := make(map[types.UUID]rewardInstanceMeta, len(ids))
+	engineCtx := &common.EngineContext{TxContext: &common.TxContext{Ctx: ctx}}
+	err = svc.engine.Execute(engineCtx, readTx, query, params, func(row *common.Row) error {
+		if len(row.Values) != 3 {
+			return fmt.Errorf("expected 3 columns, got %d", len(row.Values))
+		}
+		id, ok := row.Values[0].(*types.UUID)
+		if !ok {
+			return fmt.Errorf("id column type %T", row.Values[0])
+		}
+		escrow, ok := row.Values[1].([]byte)
+		if !ok {
+			return fmt.Errorf("escrow_address type %T", row.Values[1])
+		}
+		var erc20 []byte
+		if row.Values[2] != nil {
+			erc20, ok = row.Values[2].([]byte)
+			if !ok {
+				return fmt.Errorf("erc20_address type %T", row.Values[2])
+			}
+		}
+		metaByID[*id] = rewardInstanceMeta{escrow: escrow, erc20: erc20}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, e := range erc20Entries {
+		meta := metaByID[e.id]
+		if len(meta.escrow) > 0 {
+			entries[e.idx].EscrowAddress = "0x" + hex.EncodeToString(meta.escrow)
+		}
+		if len(meta.erc20) > 0 {
+			entries[e.idx].Erc20Address = "0x" + hex.EncodeToString(meta.erc20)
+		}
+	}
+	return nil
 }
 
 // GetWithdrawalProof retrieves the merkle proof and validator signatures for a withdrawal.

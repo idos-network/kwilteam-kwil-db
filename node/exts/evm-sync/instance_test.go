@@ -2,13 +2,20 @@ package evmsync
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/require"
+
+	"github.com/trufnetwork/kwil-db/core/log"
+	"github.com/trufnetwork/kwil-db/node/exts/evm-sync/chains"
 )
 
 // TestSerializeDeserializeEthLogs tests that we can round-trip logs
@@ -214,10 +221,7 @@ func TestListenerRecoveryConstants(t *testing.T) {
 
 	for i, expected := range expectedDelays {
 		require.Equal(t, expected, delay, "delay at iteration %d should be %v", i, expected)
-		delay = delay * time.Duration(recoveryBackoffMultiplier)
-		if delay > maxRecoveryDelay {
-			delay = maxRecoveryDelay
-		}
+		delay = min(delay*time.Duration(recoveryBackoffMultiplier), maxRecoveryDelay)
 	}
 }
 
@@ -243,4 +247,87 @@ func TestDeserializeEthLogsMalformedData(t *testing.T) {
 	// Try to deserialize
 	_, err = deserializeEthLogs(buf.Bytes())
 	require.Error(t, err, "deserialization should fail on malformed data")
+}
+
+// mockEventKVReader implements EventKVReader for tests.
+type mockEventKVReader struct {
+	getFunc func(ctx context.Context, key []byte) ([]byte, error)
+}
+
+func (m *mockEventKVReader) Get(ctx context.Context, key []byte) ([]byte, error) {
+	if m.getFunc != nil {
+		return m.getFunc(ctx, key)
+	}
+	return nil, nil
+}
+
+// TestGetListenerSyncStatus exercises GetListenerSyncStatus with the package-level
+// EventSyncer. These subtests must not run in parallel (do not call t.Parallel());
+// they register/unregister listeners on the singleton and use unique topic names
+// per subtest to isolate state.
+func TestGetListenerSyncStatus(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty_listeners", func(t *testing.T) {
+		// With no listeners registered, result should be empty regardless of KV.
+		kv := &mockEventKVReader{}
+		statuses, err := GetListenerSyncStatus(ctx, kv)
+		require.NoError(t, err)
+		require.Empty(t, statuses)
+	})
+
+	t.Run("one_listener_with_block", func(t *testing.T) {
+		topic := "test_listener_" + strings.ReplaceAll(t.Name(), "/", "_")
+		err := EventSyncer.RegisterNewListener(EVMEventListenerConfig{
+			UniqueName: topic,
+			Chain:      chains.ArbitrumOne,
+			GetLogs: func(context.Context, *ethclient.Client, uint64, uint64, log.Logger) ([]*EthLog, error) {
+				return nil, nil
+			},
+		})
+		require.NoError(t, err)
+		defer func() { _ = EventSyncer.UnregisterListener(topic) }()
+
+		wantBlock := int64(12345678)
+		blockBytes := make([]byte, 8)
+		binary.LittleEndian.PutUint64(blockBytes, uint64(wantBlock))
+
+		kv := &mockEventKVReader{
+			getFunc: func(_ context.Context, key []byte) ([]byte, error) {
+				if string(key) == lastSeenHeightKeyForStatus+topic {
+					return blockBytes, nil
+				}
+				return nil, nil
+			},
+		}
+		statuses, err := GetListenerSyncStatus(ctx, kv)
+		require.NoError(t, err)
+		require.Len(t, statuses, 1)
+		require.Equal(t, topic, statuses[0].Topic)
+		require.Equal(t, string(chains.ArbitrumOne), statuses[0].Chain)
+		require.Equal(t, wantBlock, statuses[0].LastProcessedBlock)
+	})
+
+	t.Run("kv_get_error", func(t *testing.T) {
+		topic := "test_listener_" + strings.ReplaceAll(t.Name(), "/", "_")
+		err := EventSyncer.RegisterNewListener(EVMEventListenerConfig{
+			UniqueName: topic,
+			Chain:      chains.ArbitrumOne,
+			GetLogs: func(context.Context, *ethclient.Client, uint64, uint64, log.Logger) ([]*EthLog, error) {
+				return nil, nil
+			},
+		})
+		require.NoError(t, err)
+		defer func() { _ = EventSyncer.UnregisterListener(topic) }()
+
+		kvErr := errors.New("kv read failed")
+		kv := &mockEventKVReader{
+			getFunc: func(context.Context, []byte) ([]byte, error) {
+				return nil, kvErr
+			},
+		}
+		_, err = GetListenerSyncStatus(ctx, kv)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "kv read failed")
+	})
 }

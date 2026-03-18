@@ -539,11 +539,12 @@ func TestERC20BridgeConfig_Validate_StartBlock(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "chain name case insensitive",
+			name: "non-canonical chain key rejected",
 			cfg: ERC20BridgeConfig{
 				StartBlock: map[string]string{"Ethereum": "0"},
 			},
-			wantErr: false,
+			wantErr: true,
+			errMsg:  "canonical chain name",
 		},
 		{
 			name: "unknown chain",
@@ -551,7 +552,7 @@ func TestERC20BridgeConfig_Validate_StartBlock(t *testing.T) {
 				StartBlock: map[string]string{"unknown_chain": "0"},
 			},
 			wantErr: true,
-			errMsg:  "erc20_bridge.start_block: unknown chain",
+			errMsg:  "erc20_bridge.start_block: invalid chain",
 		},
 		{
 			name: "invalid value not a number",

@@ -2501,14 +2501,12 @@ func (s *schemaVisitor) cleanStringIdent(t antlr.ParserRuleContext, i string) st
 
 // validateVariableIdentifier validates that a variable's identifier is not too long.
 // It doesn't check if it is a keyword, since variables have $ prefixes.
+// The length limit is validation.MAX_IDENT_NAME_LENGTH (single source of truth).
 func (s *schemaVisitor) validateVariableIdentifier(i antlr.ParserRuleContext, str string) {
 	if len(str) > validation.MAX_IDENT_NAME_LENGTH {
-		s.errs.RuleErr(i, ErrIdentifier, "maximum identifier length is %d", maxIdentifierLength)
+		s.errs.RuleErr(i, ErrIdentifier, "maximum identifier length is %d", validation.MAX_IDENT_NAME_LENGTH)
 	}
 }
-
-// pg max is 63, but Kwil sometimes adds extra characters
-var maxIdentifierLength = 32
 
 // createDefaultValueFromLiteral creates a DefaultValue from a literal value.
 // Only literal values are supported for security and performance reasons.

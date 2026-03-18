@@ -1,6 +1,57 @@
 # User Service Tests
 
-This directory contains tests for the JSON-RPC user service, including withdrawal proof functionality.
+This directory contains tests for the JSON-RPC user service, including withdrawal proof and listener sync status.
+
+---
+
+## Listener sync status
+
+The `user.listener_sync_status` method returns the last processed block for each EVM listener (e.g. kwil_erc20_meta deposit/withdrawal listeners). It is exposed on the **user** RPC (default port 8484) so monitoring can call it in production where the admin API is not exposed.
+
+### Request
+
+- **Method**: `user.listener_sync_status`
+- **Params**: `{}` (none)
+
+### cURL example
+
+```bash
+curl -s -X POST http://localhost:8484/rpc/v1 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"user.listener_sync_status","params":{},"id":1}'
+```
+
+Replace host/port if your node uses a different user RPC address.
+
+### Example response
+
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "listeners": [
+      {
+        "topic": "erc20_transfer_listener_<uuid>",
+        "chain": "arbitrum_one",
+        "last_processed_block": 123456789
+      }
+    ]
+  },
+  "id": 1
+}
+```
+
+- **topic**: Listener identifier.
+- **chain**: Outer chain name (e.g. `arbitrum_one`).
+- **last_processed_block**: Last block number processed by that listener on the outer chain.
+
+If the node has no event store or no listeners, `listeners` is `null` or `[]`.
+
+### Health checks
+
+A monitoring service (e.g. AWS Lambda) can periodically call this endpoint on each node, fetch the current block from the outer chain (e.g. `eth_blockNumber` on Arbitrum), and alarm when `current_block - last_processed_block` exceeds a threshold for any listener.
+
+---
 
 ## GetWithdrawalProof Tests
 

@@ -116,3 +116,22 @@ type WithdrawalProofResponse struct {
 	EstimatedReadyAt    *int64               `json:"estimated_ready_at,omitempty"` // Unix timestamp (seconds), null if not pending
 	EthTxHash           *string              `json:"eth_tx_hash,omitempty"`        // Ethereum TX hash if completed (0x...)
 }
+
+// ListenerSyncStatusResponse is the response for user.listener_sync_status.
+type ListenerSyncStatusResponse struct {
+	Listeners []ListenerStatusEntry `json:"listeners"`
+}
+
+// ListenerStatusEntry is one EVM listener's sync status.
+type ListenerStatusEntry struct {
+	Topic              string `json:"topic"`
+	Chain              string `json:"chain"`
+	LastProcessedBlock int64  `json:"last_processed_block"`
+	// EscrowAddress is the escrow contract address (hex with 0x) when this listener
+	// is an erc20-bridge listener (topic name erc20_transfer_listener_<uuid> or
+	// erc20_withdrawal_listener_<uuid>); empty otherwise.
+	EscrowAddress string `json:"escrow_address,omitempty"`
+	// Erc20Address is the synced ERC20 token address (hex with 0x) from reward_instances;
+	// empty if not an erc20-bridge listener or not yet synced.
+	Erc20Address string `json:"erc20_address,omitempty"`
+}
