@@ -24,10 +24,10 @@ func TestListenerSyncStatusEscrowInstanceID(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name     string
-		topic    string
-		wantID   types.UUID
-		wantOK   bool
+		name   string
+		topic  string
+		wantID types.UUID
+		wantOK bool
 	}{
 		{
 			name:   "transfer_listener_valid",

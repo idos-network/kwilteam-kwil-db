@@ -1238,8 +1238,8 @@ func (svc *Service) enrichListenerSyncStatusEscrow(ctx context.Context, entries 
 	query := `{kwil_erc20_meta}SELECT id, escrow_address, erc20_address FROM reward_instances WHERE id IN (` + strings.Join(inPlaceholders, ", ") + `)`
 
 	type rewardInstanceMeta struct {
-		escrow  []byte
-		erc20   []byte
+		escrow []byte
+		erc20  []byte
 	}
 	metaByID := make(map[types.UUID]rewardInstanceMeta, len(ids))
 	engineCtx := &common.EngineContext{TxContext: &common.TxContext{Ctx: ctx}}
