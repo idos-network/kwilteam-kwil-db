@@ -147,7 +147,8 @@ func (r *respCall) MarshalText() (text []byte, err error) {
 // buildExecutionInputs will build the inputs for an action execution/call.
 func buildExecutionInputs(ctx context.Context, client clientType.Client, namespace string, action string, inputs []map[string]string) ([][]any, error) {
 	params, err := GetParamList(ctx, func(ctx context.Context, query string, args map[string]any) (*types.QueryResult, error) {
-		return client.Query(ctx, query, args, false)
+		// Introspection uses user.query; user.authenticated_query requires RPC private mode.
+		return client.Query(ctx, query, args, true)
 	}, namespace, action)
 	if err != nil {
 		return nil, err
