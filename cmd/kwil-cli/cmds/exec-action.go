@@ -104,8 +104,7 @@ func execActionCmd() *cobra.Command {
 				return client.DialClient(cmd.Context(), cmd, 0, func(ctx context.Context, cl clientType.Client, conf *config.KwilCliConfig) error {
 					// if named params are specified (they are here with csv), we need to query the action to find their positions
 					paramList, err := GetParamList(ctx, func(ctx context.Context, query string, args map[string]any) (*types.QueryResult, error) {
-						// Introspection uses user.query; user.authenticated_query requires RPC private mode.
-						return cl.Query(ctx, query, args, true)
+						return common.QueryForParamList(ctx, cl, query, args)
 					}, namespace, args[0])
 					if err != nil {
 						return display.PrintErr(cmd, err)
@@ -140,8 +139,7 @@ func execActionCmd() *cobra.Command {
 				// if named params are specified, we need to query the action to find their positions
 				if len(namedParams) > 0 {
 					paramList, err := GetParamList(ctx, func(ctx context.Context, query string, args map[string]any) (*types.QueryResult, error) {
-						// Introspection uses user.query; user.authenticated_query requires RPC private mode.
-						return cl.Query(ctx, query, args, true)
+						return common.QueryForParamList(ctx, cl, query, args)
 					}, namespace, args[0])
 					if err != nil {
 						return display.PrintErr(cmd, err)
