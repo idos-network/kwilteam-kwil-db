@@ -24,7 +24,10 @@ func QueryForParamList(ctx context.Context, cl clientType.Client, query string, 
 	}
 	switch rpcErr.Code {
 	case jsonrpc.ErrorNoQueryWithPrivateRPC:
-		return cl.Query(ctx, query, args, false)
+		// Only user.query returns -1007 (private RPC). First attempt already used
+		// authenticated_query when a signer exists; without a signer there is no
+		// alternative RPC to try (retrying with skipAuth=false still calls user.query).
+		return nil, err
 	case jsonrpc.ErrorAuthenticatedQueryRequiresPrivateRPC:
 		if cl.Signer() != nil {
 			return cl.Query(ctx, query, args, true)
