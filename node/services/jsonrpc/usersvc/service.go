@@ -585,13 +585,13 @@ func (svc *Service) EstimatePrice(ctx context.Context, req *userjson.EstimatePri
 }
 
 func (svc *Service) Query(ctx context.Context, req *userjson.QueryRequest) (*userjson.QueryResponse, *jsonrpc.Error) {
-	ctxExec, cancel := context.WithTimeout(ctx, svc.readTxTimeout)
-	defer cancel()
-
 	if svc.privateMode {
 		return nil, jsonrpc.NewError(jsonrpc.ErrorNoQueryWithPrivateRPC,
 			"query is prohibited when authenticated calls are enforced (private mode)", nil)
 	}
+
+	ctxExec, cancel := context.WithTimeout(ctx, svc.readTxTimeout)
+	defer cancel()
 
 	readTx := svc.db.BeginDelayedReadTx()
 	defer readTx.Rollback(ctx)
@@ -626,13 +626,13 @@ func (svc *Service) Query(ctx context.Context, req *userjson.QueryRequest) (*use
 }
 
 func (svc *Service) AuthenticatedQuery(ctx context.Context, req *userjson.AuthenticatedQueryRequest) (*userjson.QueryResponse, *jsonrpc.Error) {
-	ctxExec, cancel := context.WithTimeout(ctx, svc.readTxTimeout)
-	defer cancel()
-
 	if !svc.privateMode {
 		return nil, jsonrpc.NewError(jsonrpc.ErrorAuthenticatedQueryRequiresPrivateRPC,
 			"user.authenticated_query is only available when RPC private mode is enabled", nil)
 	}
+
+	ctxExec, cancel := context.WithTimeout(ctx, svc.readTxTimeout)
+	defer cancel()
 
 	sigText, err := req.SigText()
 	if err != nil {
