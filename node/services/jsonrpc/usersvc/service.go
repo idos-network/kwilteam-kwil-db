@@ -629,6 +629,11 @@ func (svc *Service) AuthenticatedQuery(ctx context.Context, req *userjson.Authen
 	ctxExec, cancel := context.WithTimeout(ctx, svc.readTxTimeout)
 	defer cancel()
 
+	if !svc.privateMode {
+		return nil, jsonrpc.NewError(jsonrpc.ErrorAuthenticatedQueryRequiresPrivateRPC,
+			"user.authenticated_query is only available when RPC private mode is enabled", nil)
+	}
+
 	sigText, err := req.SigText()
 	if err != nil {
 		return nil, jsonrpc.NewError(jsonrpc.ErrorInvalidParams, "failed to create signature text: "+err.Error(), nil)
