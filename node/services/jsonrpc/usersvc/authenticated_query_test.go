@@ -15,6 +15,30 @@ import (
 	"github.com/trufnetwork/kwil-db/core/types"
 )
 
+func TestAuthenticatedQueryNilRequest(t *testing.T) {
+	svc := &Service{
+		log: log.DiscardLogger,
+	}
+
+	_, rpcErr := svc.AuthenticatedQuery(context.Background(), nil)
+
+	require.NotNil(t, rpcErr)
+	require.Equal(t, jsonrpc.ErrorInvalidParams, rpcErr.Code)
+	require.Contains(t, rpcErr.Message, "missing authenticated query request")
+}
+
+func TestAuthenticatedQueryNilBody(t *testing.T) {
+	svc := &Service{
+		log: log.DiscardLogger,
+	}
+
+	_, rpcErr := svc.AuthenticatedQuery(context.Background(), &userjson.AuthenticatedQueryRequest{})
+
+	require.NotNil(t, rpcErr)
+	require.Equal(t, jsonrpc.ErrorInvalidParams, rpcErr.Code)
+	require.Contains(t, rpcErr.Message, "missing authenticated query body")
+}
+
 func TestAuthenticatedQueryOpenModeSmokeUnsignedRequest(t *testing.T) {
 	svc := &Service{
 		log:           log.DiscardLogger,

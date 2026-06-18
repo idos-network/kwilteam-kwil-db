@@ -624,6 +624,13 @@ func (svc *Service) Query(ctx context.Context, req *userjson.QueryRequest) (*use
 }
 
 func (svc *Service) AuthenticatedQuery(ctx context.Context, req *userjson.AuthenticatedQueryRequest) (*userjson.QueryResponse, *jsonrpc.Error) {
+	if req == nil {
+		return nil, jsonrpc.NewError(jsonrpc.ErrorInvalidParams, "missing authenticated query request", nil)
+	}
+	if req.Body == nil {
+		return nil, jsonrpc.NewError(jsonrpc.ErrorInvalidParams, "missing authenticated query body", nil)
+	}
+
 	ctxExec, cancel := context.WithTimeout(ctx, svc.readTxTimeout)
 	defer cancel()
 
