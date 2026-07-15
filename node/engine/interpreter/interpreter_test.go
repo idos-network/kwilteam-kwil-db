@@ -853,6 +853,47 @@ func Test_SQL(t *testing.T) {
 	}
 }
 
+func Test_SelectPrivilegeChecksReferencedNamespaces(t *testing.T) {
+	db := newTestDB(t, nil, nil)
+
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx) // always rollback
+
+	interp := newTestInterp(t, tx, []string{
+		`INSERT INTO users (id, name, age) VALUES (1, 'Alice', 30);`,
+		`REVOKE SELECT ON main FROM default;`,
+	}, true)
+
+	var values [][]any
+	err = interp.Execute(newEngineCtx("default"), tx, `{info}SELECT * FROM main.users;`, nil, func(row *common.Row) error {
+		values = append(values, row.Values)
+		return nil
+	})
+	require.ErrorIs(t, err, engine.ErrDoesNotHavePrivilege)
+	require.Contains(t, err.Error(), `SELECT on namespace "main"`)
+	require.Empty(t, values)
+
+	values = nil
+	err = interp.Execute(newEngineCtx("default"), tx, `{info}SELECT name FROM tables WHERE namespace = 'main' AND name = 'users';`, nil, func(row *common.Row) error {
+		values = append(values, row.Values)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, [][]any{{"users"}}, values)
+
+	err = interp.Execute(newEngineCtx(defaultCaller), tx, `CREATE ROLE main_reader;`, nil, nil)
+	require.NoError(t, err)
+	err = interp.Execute(newEngineCtx(defaultCaller), tx, `GRANT SELECT ON main TO main_reader;`, nil, nil)
+	require.NoError(t, err)
+	err = interp.Execute(newEngineCtx(defaultCaller), tx, `GRANT main_reader TO 'main_reader';`, nil, nil)
+	require.NoError(t, err)
+
+	err = interp.Execute(newEngineCtx("main_reader"), tx, `{info}SELECT name FROM main.users;`, nil, exact("Alice"))
+	require.NoError(t, err)
+}
+
 func colEq(t *testing.T, a, b any) {
 	// if it is a numeric, we should do a special comparison
 	if a != nil {
