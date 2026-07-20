@@ -57,8 +57,6 @@ func TestAuthenticatedQueryOpenModeSmokeUnsignedRequest(t *testing.T) {
 	_, rpcErr := svc.AuthenticatedQuery(context.Background(), req)
 
 	require.NotNil(t, rpcErr)
-	require.NotEqual(t, jsonrpc.ErrorAuthenticatedQueryRequiresPrivateRPC, rpcErr.Code,
-		"open RPC must not reject authenticated_query before authentication")
 	require.Equal(t, jsonrpc.ErrorCallChallengeNotFound, rpcErr.Code)
 	require.Contains(t, rpcErr.Message, "signed call message with challenge required")
 }
