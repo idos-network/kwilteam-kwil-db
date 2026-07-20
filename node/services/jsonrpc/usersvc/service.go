@@ -228,15 +228,13 @@ func NewService(db DB, engine EngineReader, chainClient BlockchainTransactor,
 
 	// Start the expiry goroutine, unsupervised for now since services don't
 	// "start" or "stop", but their lifetime is roughly that of the process.
-	if cfg.privateMode {
-		go func() {
-			ticker := time.NewTicker(5 * time.Second)
-			defer ticker.Stop()
-			for range ticker.C {
-				svc.expireChallenges()
-			}
-		}()
-	}
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			svc.expireChallenges()
+		}
+	}()
 
 	return svc
 }
@@ -626,9 +624,11 @@ func (svc *Service) Query(ctx context.Context, req *userjson.QueryRequest) (*use
 }
 
 func (svc *Service) AuthenticatedQuery(ctx context.Context, req *userjson.AuthenticatedQueryRequest) (*userjson.QueryResponse, *jsonrpc.Error) {
-	if !svc.privateMode {
-		return nil, jsonrpc.NewError(jsonrpc.ErrorAuthenticatedQueryRequiresPrivateRPC,
-			"user.authenticated_query is only available when RPC private mode is enabled", nil)
+	if req == nil {
+		return nil, jsonrpc.NewError(jsonrpc.ErrorInvalidParams, "missing authenticated query request", nil)
+	}
+	if req.Body == nil {
+		return nil, jsonrpc.NewError(jsonrpc.ErrorInvalidParams, "missing authenticated query body", nil)
 	}
 
 	ctxExec, cancel := context.WithTimeout(ctx, svc.readTxTimeout)
@@ -639,7 +639,7 @@ func (svc *Service) AuthenticatedQuery(ctx context.Context, req *userjson.Authen
 		return nil, jsonrpc.NewError(jsonrpc.ErrorInvalidParams, "failed to create signature text: "+err.Error(), nil)
 	}
 
-	if jsonRPCErr := svc.authenticate(req.SignatureData, req.Challenge, req.Sender, req.AuthType, sigText); jsonRPCErr != nil {
+	if jsonRPCErr := svc.authenticateRequired(req.SignatureData, req.Challenge, req.Sender, req.AuthType, sigText); jsonRPCErr != nil {
 		return nil, jsonRPCErr
 	}
 
@@ -925,13 +925,19 @@ func (svc *Service) txCtx(ctx context.Context, sender []byte, authtype string) (
 	}, nil
 }
 
-// authenticate enforces authentication for the given context and message
-// if private mode is enabled. It returns an error if authentication fails.
+// authenticate enforces authentication for the given context and message if
+// private mode is enabled. It returns an error if authentication fails.
 func (svc *Service) authenticate(signature, challenge, sender []byte, authtype, sigTxt string) *jsonrpc.Error {
 	if !svc.privateMode {
 		return nil
 	}
 
+	return svc.authenticateRequired(signature, challenge, sender, authtype, sigTxt)
+}
+
+// authenticateRequired enforces authentication for RPCs that require a signed
+// challenge regardless of the service mode.
+func (svc *Service) authenticateRequired(signature, challenge, sender []byte, authtype, sigTxt string) *jsonrpc.Error {
 	// Authenticate by validating the challenge was server-issued, and verify
 	// the signature on the serialized call message that include the challenge.
 
