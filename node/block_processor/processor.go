@@ -255,6 +255,13 @@ func (bp *BlockProcessor) checkTx(ctx context.Context, readTx sql.Tx, ntx *types
 	bp.log.Debug("Check transaction", "Recheck", recheck, "Hash", txHash, "Sender", log.LazyHex(tx.Sender),
 		"PayloadType", tx.Body.PayloadType, "Nonce", tx.Body.Nonce, "TxFee", tx.Body.Fee)
 
+	blockCtx := &common.BlockContext{
+		ChainContext: bp.chainCtx,
+		Height:       height + 1,
+		Timestamp:    blockTime.Unix() + 1, // eh, one second later... ?
+		Proposer:     bp.chainCtx.NetworkParameters.Leader,
+	}
+
 	if !recheck {
 		// Verify the correct chain ID is set, if it is set.
 		if protected := tx.Body.ChainID != ""; protected && tx.Body.ChainID != bp.genesisParams.ChainID {
@@ -262,7 +269,7 @@ func (bp *BlockProcessor) checkTx(ctx context.Context, readTx sql.Tx, ntx *types
 		}
 
 		// Ensure that the transaction is valid in terms of the signature and the payload type
-		if err := verifyTransaction(tx); err != nil {
+		if err := verifyTransactionWithContext(authExt.VerifyContext{BlockContext: blockCtx}, tx); err != nil {
 			bp.log.Debug("Failed to verify the transaction", "err", err)
 			return fmt.Errorf("failed to verify the transaction: %w", err)
 		}
@@ -274,13 +281,8 @@ func (bp *BlockProcessor) checkTx(ctx context.Context, readTx sql.Tx, ntx *types
 	}
 
 	return bp.txapp.ApplyMempool(&common.TxContext{
-		Ctx: ctx,
-		BlockContext: &common.BlockContext{
-			ChainContext: bp.chainCtx,
-			Height:       height + 1,
-			Timestamp:    blockTime.Unix() + 1, // eh, one second later... ?
-			Proposer:     bp.chainCtx.NetworkParameters.Leader,
-		},
+		Ctx:           ctx,
+		BlockContext:  blockCtx,
 		TxID:          hex.EncodeToString(txHash[:]),
 		Signer:        tx.Sender,
 		Caller:        ident,
@@ -413,6 +415,16 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 	txHashes := bp.initBlockExecutionStatus(req.Block)
 
 	for i, tx := range req.Block.Txns {
+		requiresContext, err := authExt.RequiresContext(tx.Signature.Type)
+		if err != nil {
+			return nil, fmt.Errorf("failed to inspect block tx authenticator: %w", err)
+		}
+		if requiresContext {
+			if err := verifyTransactionWithContext(authExt.VerifyContext{BlockContext: blockCtx}, tx); err != nil {
+				return nil, fmt.Errorf("failed to verify block tx: %w", err)
+			}
+		}
+
 		identifier, err := authExt.GetIdentifier(tx.Signature.Type, tx.Sender)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get identifier for the block tx: %w", err)

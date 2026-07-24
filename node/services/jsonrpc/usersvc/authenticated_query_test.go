@@ -13,6 +13,7 @@ import (
 	jsonrpc "github.com/trufnetwork/kwil-db/core/rpc/json"
 	userjson "github.com/trufnetwork/kwil-db/core/rpc/json/user"
 	"github.com/trufnetwork/kwil-db/core/types"
+	authExt "github.com/trufnetwork/kwil-db/extensions/auth"
 )
 
 func TestAuthenticatedQueryNilRequest(t *testing.T) {
@@ -92,7 +93,7 @@ func TestAuthenticateOpenModeOptionalForCalls(t *testing.T) {
 		privateMode: false,
 	}
 
-	rpcErr := svc.authenticate(nil, nil, nil, "", "")
+	rpcErr := svc.authenticate(nil, nil, nil, "", "", authExt.VerifyContext{})
 
 	require.Nil(t, rpcErr)
 }
@@ -118,7 +119,7 @@ func TestAuthenticateRequiredAcceptsSignedChallenge(t *testing.T) {
 		},
 	}
 
-	rpcErr := svc.authenticateRequired(req.SignatureData, req.Challenge, req.Sender, req.AuthType, sigText)
+	rpcErr := svc.authenticateRequired(req.SignatureData, req.Challenge, req.Sender, req.AuthType, sigText, authExt.VerifyContext{})
 
 	require.Nil(t, rpcErr)
 	require.Empty(t, svc.challenges, "verified challenges are single-use")
