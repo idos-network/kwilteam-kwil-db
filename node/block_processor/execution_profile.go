@@ -21,22 +21,48 @@ type executionProfileKey struct {
 }
 
 type actionExecutionAccumulator struct {
-	transactions int
-	calls        int
-	failures     int
-	total        time.Duration
-	max          time.Duration
+	transactions  int
+	calls         int
+	failures      int
+	total         time.Duration
+	max           time.Duration
+	payloadTotal  time.Duration
+	payloadMax    time.Duration
+	overheadTotal time.Duration
+	overheadMax   time.Duration
 }
 
 type actionExecutionProfile struct {
-	PayloadType  string `json:"payload_type"`
-	Namespace    string `json:"namespace,omitempty"`
-	Action       string `json:"action,omitempty"`
-	Transactions int    `json:"transactions"`
-	Calls        int    `json:"calls"`
-	Failures     int    `json:"failures"`
-	TotalMs      int64  `json:"total_ms"`
-	MaxMs        int64  `json:"max_ms"`
+	PayloadType   string `json:"payload_type"`
+	Namespace     string `json:"namespace,omitempty"`
+	Action        string `json:"action,omitempty"`
+	Transactions  int    `json:"transactions"`
+	Calls         int    `json:"calls"`
+	Failures      int    `json:"failures"`
+	TotalMs       int64  `json:"total_ms"`
+	MaxMs         int64  `json:"max_ms"`
+	PayloadMs     int64  `json:"payload_ms"`
+	MaxPayloadMs  int64  `json:"max_payload_ms"`
+	OverheadMs    int64  `json:"overhead_ms"`
+	MaxOverheadMs int64  `json:"max_overhead_ms"`
+}
+
+func (p actionExecutionProfile) String() string {
+	return fmt.Sprintf(
+		"{payload_type=%s namespace=%s action=%s transactions=%d calls=%d failures=%d total_ms=%d payload_ms=%d overhead_ms=%d max_ms=%d max_payload_ms=%d max_overhead_ms=%d}",
+		p.PayloadType,
+		p.Namespace,
+		p.Action,
+		p.Transactions,
+		p.Calls,
+		p.Failures,
+		p.TotalMs,
+		p.PayloadMs,
+		p.OverheadMs,
+		p.MaxMs,
+		p.MaxPayloadMs,
+		p.MaxOverheadMs,
+	)
 }
 
 type slowTransactionExecution struct {
@@ -46,6 +72,22 @@ type slowTransactionExecution struct {
 	Action      string `json:"action,omitempty"`
 	Code        uint32 `json:"code"`
 	DurationMs  int64  `json:"duration_ms"`
+	PayloadMs   int64  `json:"payload_ms"`
+	OverheadMs  int64  `json:"overhead_ms"`
+}
+
+func (p slowTransactionExecution) String() string {
+	return fmt.Sprintf(
+		"{hash=%s payload_type=%s namespace=%s action=%s code=%d duration_ms=%d payload_ms=%d overhead_ms=%d}",
+		p.Hash,
+		p.PayloadType,
+		p.Namespace,
+		p.Action,
+		p.Code,
+		p.DurationMs,
+		p.PayloadMs,
+		p.OverheadMs,
+	)
 }
 
 type blockExecutionProfile struct {
@@ -65,6 +107,7 @@ func (p *blockExecutionProfile) record(
 	txHash ktypes.Hash,
 	code uint32,
 	duration time.Duration,
+	payloadDuration time.Duration,
 ) {
 	key, calls := executionAction(tx)
 	action := p.actions[key]
@@ -78,6 +121,18 @@ func (p *blockExecutionProfile) record(
 	if duration > action.max {
 		action.max = duration
 	}
+	overheadDuration := duration - payloadDuration
+	if overheadDuration < 0 {
+		overheadDuration = 0
+	}
+	action.payloadTotal += payloadDuration
+	if payloadDuration > action.payloadMax {
+		action.payloadMax = payloadDuration
+	}
+	action.overheadTotal += overheadDuration
+	if overheadDuration > action.overheadMax {
+		action.overheadMax = overheadDuration
+	}
 	if code != uint32(ktypes.CodeOk) {
 		action.failures++
 	}
@@ -90,6 +145,8 @@ func (p *blockExecutionProfile) record(
 			Action:      key.action,
 			Code:        code,
 			DurationMs:  duration.Milliseconds(),
+			PayloadMs:   payloadDuration.Milliseconds(),
+			OverheadMs:  overheadDuration.Milliseconds(),
 		})
 	}
 }
@@ -102,14 +159,18 @@ func (p *blockExecutionProfile) actionProfiles() []actionExecutionProfile {
 	profiles := make([]actionExecutionProfile, 0, len(p.actions))
 	for key, action := range p.actions {
 		profiles = append(profiles, actionExecutionProfile{
-			PayloadType:  key.payloadType,
-			Namespace:    key.namespace,
-			Action:       key.action,
-			Transactions: action.transactions,
-			Calls:        action.calls,
-			Failures:     action.failures,
-			TotalMs:      action.total.Milliseconds(),
-			MaxMs:        action.max.Milliseconds(),
+			PayloadType:   key.payloadType,
+			Namespace:     key.namespace,
+			Action:        key.action,
+			Transactions:  action.transactions,
+			Calls:         action.calls,
+			Failures:      action.failures,
+			TotalMs:       action.total.Milliseconds(),
+			MaxMs:         action.max.Milliseconds(),
+			PayloadMs:     action.payloadTotal.Milliseconds(),
+			MaxPayloadMs:  action.payloadMax.Milliseconds(),
+			OverheadMs:    action.overheadTotal.Milliseconds(),
+			MaxOverheadMs: action.overheadMax.Milliseconds(),
 		})
 	}
 	sort.Slice(profiles, func(i, j int) bool {

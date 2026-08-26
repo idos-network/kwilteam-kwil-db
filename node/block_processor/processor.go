@@ -453,7 +453,13 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 				Gas:  res.Spend,
 				Log:  res.Log,
 			}
-			executionProfile.record(tx, txHash, txResult.Code, time.Since(txStartedAt))
+			executionProfile.record(
+				tx,
+				txHash,
+				txResult.Code,
+				time.Since(txStartedAt),
+				res.PayloadExecutionDuration,
+			)
 
 			// bookkeeping for the block execution status
 			bp.updateBlockExecutionStatus(txHash)
