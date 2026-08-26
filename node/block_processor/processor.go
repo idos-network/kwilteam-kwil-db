@@ -413,6 +413,7 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 	txResults := make([]ktypes.TxResult, len(req.Block.Txns))
 
 	txHashes := bp.initBlockExecutionStatus(req.Block)
+	executionProfile := newBlockExecutionProfile()
 
 	for i, tx := range req.Block.Txns {
 		requiresContext, err := authExt.RequiresContext(tx.Signature.Type)
@@ -445,12 +446,14 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 		case <-ctx.Done():
 			return nil, ctx.Err() // notify the caller about the context cancellation or deadline exceeded error
 		default:
+			txStartedAt := time.Now()
 			res := bp.txapp.Execute(txCtx, bp.consensusTx, tx)
 			txResult := ktypes.TxResult{
 				Code: uint32(res.ResponseCode),
 				Gas:  res.Spend,
 				Log:  res.Log,
 			}
+			executionProfile.record(tx, txHash, txResult.Code, time.Since(txStartedAt))
 
 			// bookkeeping for the block execution status
 			bp.updateBlockExecutionStatus(txHash)
@@ -487,6 +490,18 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 				bp.events.UpdateStats(numEvents)
 			}
 		}
+	}
+	if !syncing && executionProfile.shouldLog() {
+		bp.log.Info(
+			"slow block transaction profile",
+			"height", req.Height,
+			"blockID", req.BlockID,
+			"leader", isLeader,
+			"transactions", len(req.Block.Txns),
+			"txExecMs", executionProfile.total.Milliseconds(),
+			"actions", executionProfile.actionProfiles(),
+			"slowTxs", executionProfile.slowTransactions(),
+		)
 	}
 
 	// record the end time of the block execution
