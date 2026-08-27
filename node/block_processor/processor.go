@@ -440,6 +440,7 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 			Authenticator: tx.Signature.Type,
 			Caller:        identifier,
 			BlockContext:  blockCtx,
+			EngineTrace:   common.NewEngineTrace(),
 		}
 
 		select {
@@ -459,6 +460,7 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 				txResult.Code,
 				time.Since(txStartedAt),
 				res.PayloadExecutionDuration,
+				txCtx.EngineTrace.Stages(),
 			)
 
 			// bookkeeping for the block execution status

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/trufnetwork/kwil-db/common"
 	ktypes "github.com/trufnetwork/kwil-db/core/types"
 )
 
@@ -30,26 +31,67 @@ type actionExecutionAccumulator struct {
 	payloadMax    time.Duration
 	overheadTotal time.Duration
 	overheadMax   time.Duration
+	stages        map[engineStageKey]*engineStageAccumulator
+}
+
+type engineStageKey struct {
+	kind      string
+	namespace string
+	name      string
+	parent    string
+}
+
+type engineStageAccumulator struct {
+	count     int
+	total     time.Duration
+	exclusive time.Duration
+	max       time.Duration
+}
+
+type engineStageProfile struct {
+	Kind        string `json:"kind"`
+	Namespace   string `json:"namespace,omitempty"`
+	Name        string `json:"name"`
+	Parent      string `json:"parent,omitempty"`
+	Count       int    `json:"count"`
+	TotalMs     int64  `json:"total_ms"`
+	ExclusiveMs int64  `json:"exclusive_ms"`
+	MaxMs       int64  `json:"max_ms"`
+}
+
+func (p engineStageProfile) String() string {
+	return fmt.Sprintf(
+		"{kind=%s namespace=%s name=%s parent=%s count=%d exclusive_ms=%d total_ms=%d max_ms=%d}",
+		p.Kind,
+		p.Namespace,
+		p.Name,
+		p.Parent,
+		p.Count,
+		p.ExclusiveMs,
+		p.TotalMs,
+		p.MaxMs,
+	)
 }
 
 type actionExecutionProfile struct {
-	PayloadType   string `json:"payload_type"`
-	Namespace     string `json:"namespace,omitempty"`
-	Action        string `json:"action,omitempty"`
-	Transactions  int    `json:"transactions"`
-	Calls         int    `json:"calls"`
-	Failures      int    `json:"failures"`
-	TotalMs       int64  `json:"total_ms"`
-	MaxMs         int64  `json:"max_ms"`
-	PayloadMs     int64  `json:"payload_ms"`
-	MaxPayloadMs  int64  `json:"max_payload_ms"`
-	OverheadMs    int64  `json:"overhead_ms"`
-	MaxOverheadMs int64  `json:"max_overhead_ms"`
+	PayloadType   string               `json:"payload_type"`
+	Namespace     string               `json:"namespace,omitempty"`
+	Action        string               `json:"action,omitempty"`
+	Transactions  int                  `json:"transactions"`
+	Calls         int                  `json:"calls"`
+	Failures      int                  `json:"failures"`
+	TotalMs       int64                `json:"total_ms"`
+	MaxMs         int64                `json:"max_ms"`
+	PayloadMs     int64                `json:"payload_ms"`
+	MaxPayloadMs  int64                `json:"max_payload_ms"`
+	OverheadMs    int64                `json:"overhead_ms"`
+	MaxOverheadMs int64                `json:"max_overhead_ms"`
+	Stages        []engineStageProfile `json:"stages,omitempty"`
 }
 
 func (p actionExecutionProfile) String() string {
 	return fmt.Sprintf(
-		"{payload_type=%s namespace=%s action=%s transactions=%d calls=%d failures=%d total_ms=%d payload_ms=%d overhead_ms=%d max_ms=%d max_payload_ms=%d max_overhead_ms=%d}",
+		"{payload_type=%s namespace=%s action=%s transactions=%d calls=%d failures=%d total_ms=%d payload_ms=%d overhead_ms=%d max_ms=%d max_payload_ms=%d max_overhead_ms=%d stages=%v}",
 		p.PayloadType,
 		p.Namespace,
 		p.Action,
@@ -62,6 +104,7 @@ func (p actionExecutionProfile) String() string {
 		p.MaxMs,
 		p.MaxPayloadMs,
 		p.MaxOverheadMs,
+		p.Stages,
 	)
 }
 
@@ -108,6 +151,7 @@ func (p *blockExecutionProfile) record(
 	code uint32,
 	duration time.Duration,
 	payloadDuration time.Duration,
+	stages []common.EngineTraceStage,
 ) {
 	key, calls := executionAction(tx)
 	action := p.actions[key]
@@ -132,6 +176,30 @@ func (p *blockExecutionProfile) record(
 	action.overheadTotal += overheadDuration
 	if overheadDuration > action.overheadMax {
 		action.overheadMax = overheadDuration
+	}
+	if len(stages) > 0 {
+		if action.stages == nil {
+			action.stages = make(map[engineStageKey]*engineStageAccumulator)
+		}
+		for _, stage := range stages {
+			key := engineStageKey{
+				kind:      stage.Kind,
+				namespace: stage.Namespace,
+				name:      stage.Name,
+				parent:    stage.Parent,
+			}
+			acc := action.stages[key]
+			if acc == nil {
+				acc = &engineStageAccumulator{}
+				action.stages[key] = acc
+			}
+			acc.count += stage.Count
+			acc.total += time.Duration(stage.TotalMs) * time.Millisecond
+			acc.exclusive += time.Duration(stage.ExclusiveMs) * time.Millisecond
+			if time.Duration(stage.MaxMs)*time.Millisecond > acc.max {
+				acc.max = time.Duration(stage.MaxMs) * time.Millisecond
+			}
+		}
 	}
 	if code != uint32(ktypes.CodeOk) {
 		action.failures++
@@ -171,6 +239,7 @@ func (p *blockExecutionProfile) actionProfiles() []actionExecutionProfile {
 			MaxPayloadMs:  action.payloadMax.Milliseconds(),
 			OverheadMs:    action.overheadTotal.Milliseconds(),
 			MaxOverheadMs: action.overheadMax.Milliseconds(),
+			Stages:        engineStageProfiles(action.stages),
 		})
 	}
 	sort.Slice(profiles, func(i, j int) bool {
@@ -219,4 +288,40 @@ func executionAction(tx *ktypes.Transaction) (executionProfileKey, int) {
 		calls = len(execution.Arguments)
 	}
 	return key, calls
+}
+
+func engineStageProfiles(stages map[engineStageKey]*engineStageAccumulator) []engineStageProfile {
+	if len(stages) == 0 {
+		return nil
+	}
+	profiles := make([]engineStageProfile, 0, len(stages))
+	for key, acc := range stages {
+		profiles = append(profiles, engineStageProfile{
+			Kind:        key.kind,
+			Namespace:   key.namespace,
+			Name:        key.name,
+			Parent:      key.parent,
+			Count:       acc.count,
+			TotalMs:     acc.total.Milliseconds(),
+			ExclusiveMs: acc.exclusive.Milliseconds(),
+			MaxMs:       acc.max.Milliseconds(),
+		})
+	}
+	sort.Slice(profiles, func(i, j int) bool {
+		left, right := profiles[i], profiles[j]
+		if left.ExclusiveMs != right.ExclusiveMs {
+			return left.ExclusiveMs > right.ExclusiveMs
+		}
+		if left.Kind != right.Kind {
+			return left.Kind < right.Kind
+		}
+		if left.Namespace != right.Namespace {
+			return left.Namespace < right.Namespace
+		}
+		if left.Name != right.Name {
+			return left.Name < right.Name
+		}
+		return left.Parent < right.Parent
+	})
+	return profiles
 }

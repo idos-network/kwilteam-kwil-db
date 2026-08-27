@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/trufnetwork/kwil-db/common"
 	ktypes "github.com/trufnetwork/kwil-db/core/types"
 )
 
@@ -23,6 +24,26 @@ func TestBlockExecutionProfileAggregatesActionsAndSlowTransactions(t *testing.T)
 		uint32(ktypes.CodeOk),
 		300*time.Millisecond,
 		250*time.Millisecond,
+		[]common.EngineTraceStage{
+			{
+				Kind:        common.EngineTraceKindAction,
+				Namespace:   "idos",
+				Name:        "finalize_credentials_as_gateway",
+				Count:       1,
+				TotalMs:     250,
+				ExclusiveMs: 200,
+				MaxMs:       200,
+			},
+			{
+				Kind:        common.EngineTraceKindSQL,
+				Name:        "delete:preliminary_credentials",
+				Parent:      "finalize_credentials_as_gateway",
+				Count:       1,
+				TotalMs:     50,
+				ExclusiveMs: 50,
+				MaxMs:       50,
+			},
+		},
 	)
 	profile.record(
 		executeTx,
@@ -30,6 +51,26 @@ func TestBlockExecutionProfileAggregatesActionsAndSlowTransactions(t *testing.T)
 		1,
 		700*time.Millisecond,
 		600*time.Millisecond,
+		[]common.EngineTraceStage{
+			{
+				Kind:        common.EngineTraceKindAction,
+				Namespace:   "idos",
+				Name:        "finalize_credentials_as_gateway",
+				Count:       1,
+				TotalMs:     600,
+				ExclusiveMs: 500,
+				MaxMs:       500,
+			},
+			{
+				Kind:        common.EngineTraceKindSQL,
+				Name:        "delete:preliminary_credentials",
+				Parent:      "finalize_credentials_as_gateway",
+				Count:       1,
+				TotalMs:     100,
+				ExclusiveMs: 100,
+				MaxMs:       100,
+			},
+		},
 	)
 	profile.record(
 		transferTx,
@@ -37,6 +78,7 @@ func TestBlockExecutionProfileAggregatesActionsAndSlowTransactions(t *testing.T)
 		uint32(ktypes.CodeOk),
 		2*time.Second,
 		1500*time.Millisecond,
+		nil,
 	)
 
 	require.True(t, profile.shouldLog())
@@ -66,6 +108,26 @@ func TestBlockExecutionProfileAggregatesActionsAndSlowTransactions(t *testing.T)
 			MaxPayloadMs:  600,
 			OverheadMs:    150,
 			MaxOverheadMs: 100,
+			Stages: []engineStageProfile{
+				{
+					Kind:        common.EngineTraceKindAction,
+					Namespace:   "idos",
+					Name:        "finalize_credentials_as_gateway",
+					Count:       2,
+					TotalMs:     850,
+					ExclusiveMs: 700,
+					MaxMs:       500,
+				},
+				{
+					Kind:        common.EngineTraceKindSQL,
+					Name:        "delete:preliminary_credentials",
+					Parent:      "finalize_credentials_as_gateway",
+					Count:       2,
+					TotalMs:     150,
+					ExclusiveMs: 150,
+					MaxMs:       100,
+				},
+			},
 		},
 	}, profile.actionProfiles())
 
@@ -89,6 +151,7 @@ func TestBlockExecutionProfileLogsCumulativeSlowBlock(t *testing.T) {
 			uint32(ktypes.CodeOk),
 			500*time.Millisecond,
 			400*time.Millisecond,
+			nil,
 		)
 	}
 
@@ -97,6 +160,26 @@ func TestBlockExecutionProfileLogsCumulativeSlowBlock(t *testing.T) {
 	require.Equal(t, int64(5_000), profile.actionProfiles()[0].TotalMs)
 	require.Equal(t, int64(4_000), profile.actionProfiles()[0].PayloadMs)
 	require.Equal(t, int64(1_000), profile.actionProfiles()[0].OverheadMs)
+}
+
+func TestBlockExecutionProfileOmitsEmptyStages(t *testing.T) {
+	t.Parallel()
+
+	tx := executionProfileTestActionTx(t, "idos", "create_preliminary_credential", 1)
+	profile := newBlockExecutionProfile()
+	profile.record(
+		tx,
+		ktypes.HashBytes([]byte{1}),
+		uint32(ktypes.CodeOk),
+		2*time.Second,
+		1800*time.Millisecond,
+		nil,
+	)
+
+	profiles := profile.actionProfiles()
+	require.Len(t, profiles, 1)
+	require.Nil(t, profiles[0].Stages)
+	require.True(t, profile.shouldLog())
 }
 
 func executionProfileTestActionTx(

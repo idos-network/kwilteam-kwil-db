@@ -716,7 +716,7 @@ func (i *baseInterpreter) call(ctx *common.EngineContext, db sql.DB, namespace, 
 		}
 	}
 
-	err = exec.Func(execCtx, argVals, func(row *row) error {
+	err = observeExecutable(execCtx, namespace, exec, argVals, func(row *row) error {
 		return resultFn(rowToCommonRow(row))
 	})
 
