@@ -146,7 +146,7 @@ func TestBlockExecutionProfileLogsCumulativeSlowBlock(t *testing.T) {
 
 	tx := executionProfileTestActionTx(t, "idos", "create_preliminary_credential", 1)
 	profile := newBlockExecutionProfile()
-	for i := range 10 {
+	for i := range 2 {
 		profile.record(
 			tx,
 			ktypes.HashBytes([]byte{byte(i)}),
@@ -155,13 +155,16 @@ func TestBlockExecutionProfileLogsCumulativeSlowBlock(t *testing.T) {
 			400*time.Millisecond,
 			nil,
 		)
+		if i == 0 {
+			require.False(t, profile.shouldLog())
+		}
 	}
 
 	require.True(t, profile.shouldLog())
 	require.Empty(t, profile.slowTransactions())
-	require.Equal(t, int64(5_000), profile.actionProfiles()[0].TotalMs)
-	require.Equal(t, int64(4_000), profile.actionProfiles()[0].PayloadMs)
-	require.Equal(t, int64(1_000), profile.actionProfiles()[0].OverheadMs)
+	require.Equal(t, int64(1_000), profile.actionProfiles()[0].TotalMs)
+	require.Equal(t, int64(800), profile.actionProfiles()[0].PayloadMs)
+	require.Equal(t, int64(200), profile.actionProfiles()[0].OverheadMs)
 }
 
 func TestBlockExecutionProfileOmitsEmptyStages(t *testing.T) {

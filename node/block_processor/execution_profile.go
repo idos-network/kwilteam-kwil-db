@@ -11,7 +11,7 @@ import (
 
 const (
 	// ponytail: fixed thresholds keep profiling zero-config; make them configurable only if production volume requires it.
-	slowBlockTransactionExecutionThreshold = 5 * time.Second
+	slowBlockTransactionExecutionThreshold = time.Second
 	slowTransactionExecutionThreshold      = time.Second
 )
 
