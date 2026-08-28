@@ -137,6 +137,8 @@ func TestBlockExecutionProfileAggregatesActionsAndSlowTransactions(t *testing.T)
 	require.Equal(t, int64(2_000), slowTxs[0].DurationMs)
 	require.Equal(t, int64(1_500), slowTxs[0].PayloadMs)
 	require.Equal(t, int64(500), slowTxs[0].OverheadMs)
+	require.Equal(t, int64(0), slowTxs[0].TracedMs)
+	require.Equal(t, int64(1_500), slowTxs[0].UntracedMs)
 }
 
 func TestBlockExecutionProfileLogsCumulativeSlowBlock(t *testing.T) {
@@ -180,6 +182,44 @@ func TestBlockExecutionProfileOmitsEmptyStages(t *testing.T) {
 	require.Len(t, profiles, 1)
 	require.Nil(t, profiles[0].Stages)
 	require.True(t, profile.shouldLog())
+}
+
+func TestBlockExecutionProfileReportsTracedAndUntracedPayloadTime(t *testing.T) {
+	t.Parallel()
+
+	tx := executionProfileTestActionTx(t, "idos", "upsert_wallet_as_inserter", 1)
+	profile := newBlockExecutionProfile()
+	profile.record(
+		tx,
+		ktypes.HashBytes([]byte("slow-upsert")),
+		uint32(ktypes.CodeOk),
+		1200*time.Millisecond,
+		time.Second,
+		[]common.EngineTraceStage{
+			{
+				Kind:        common.EngineTraceKindRuntime,
+				Name:        "interpreter_write_lock_wait",
+				Count:       1,
+				TotalMs:     700,
+				ExclusiveMs: 700,
+				MaxMs:       700,
+			},
+			{
+				Kind:        common.EngineTraceKindAction,
+				Namespace:   "idos",
+				Name:        "upsert_wallet_as_inserter",
+				Count:       1,
+				TotalMs:     250,
+				ExclusiveMs: 250,
+				MaxMs:       250,
+			},
+		},
+	)
+
+	slowTxs := profile.slowTransactions()
+	require.Len(t, slowTxs, 1)
+	require.Equal(t, int64(950), slowTxs[0].TracedMs)
+	require.Equal(t, int64(50), slowTxs[0].UntracedMs)
 }
 
 func executionProfileTestActionTx(

@@ -1,12 +1,15 @@
 package interpreter
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/trufnetwork/kwil-db/common"
+	"github.com/trufnetwork/kwil-db/node/types/sql"
 )
 
 func TestSQLVerbTableUsesDeterministicKeys(t *testing.T) {
@@ -77,4 +80,56 @@ func TestObserveExecutableRecordsErrorPath(t *testing.T) {
 	require.Equal(t, "main", stages[0].Namespace)
 	require.Equal(t, "credential_id_in_use", stages[0].Name)
 	require.Equal(t, 1, stages[0].Count)
+}
+
+func TestInterpreterWriteLockWaitIsTraced(t *testing.T) {
+	tr := common.NewEngineTrace()
+	engineCtx := &common.EngineContext{
+		TxContext: &common.TxContext{EngineTrace: tr},
+	}
+	interp := &ThreadSafeInterpreter{}
+	db := traceLockDB{mode: sql.ReadWrite}
+
+	interp.mu.RLock()
+	started := make(chan struct{})
+	result := make(chan lockResult, 1)
+	go func() {
+		close(started)
+		unlock, err := interp.lock(engineCtx, db)
+		result <- lockResult{unlock: unlock, err: err}
+	}()
+	<-started
+	time.Sleep(20 * time.Millisecond)
+	interp.mu.RUnlock()
+
+	got := <-result
+	require.NoError(t, got.err)
+	got.unlock()
+
+	stages := tr.Stages()
+	require.Len(t, stages, 1)
+	require.Equal(t, common.EngineTraceKindRuntime, stages[0].Kind)
+	require.Equal(t, "interpreter_write_lock_wait", stages[0].Name)
+	require.GreaterOrEqual(t, stages[0].ExclusiveMs, int64(10))
+}
+
+type lockResult struct {
+	unlock func()
+	err    error
+}
+
+type traceLockDB struct {
+	mode sql.AccessMode
+}
+
+func (d traceLockDB) AccessMode() sql.AccessMode {
+	return d.mode
+}
+
+func (traceLockDB) Execute(context.Context, string, ...any) (*sql.ResultSet, error) {
+	panic("not used")
+}
+
+func (traceLockDB) BeginTx(context.Context) (sql.Tx, error) {
+	panic("not used")
 }

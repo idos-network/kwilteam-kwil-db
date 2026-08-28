@@ -117,11 +117,13 @@ type slowTransactionExecution struct {
 	DurationMs  int64  `json:"duration_ms"`
 	PayloadMs   int64  `json:"payload_ms"`
 	OverheadMs  int64  `json:"overhead_ms"`
+	TracedMs    int64  `json:"traced_ms"`
+	UntracedMs  int64  `json:"untraced_ms"`
 }
 
 func (p slowTransactionExecution) String() string {
 	return fmt.Sprintf(
-		"{hash=%s payload_type=%s namespace=%s action=%s code=%d duration_ms=%d payload_ms=%d overhead_ms=%d}",
+		"{hash=%s payload_type=%s namespace=%s action=%s code=%d duration_ms=%d payload_ms=%d overhead_ms=%d traced_ms=%d untraced_ms=%d}",
 		p.Hash,
 		p.PayloadType,
 		p.Namespace,
@@ -130,6 +132,8 @@ func (p slowTransactionExecution) String() string {
 		p.DurationMs,
 		p.PayloadMs,
 		p.OverheadMs,
+		p.TracedMs,
+		p.UntracedMs,
 	)
 }
 
@@ -206,6 +210,14 @@ func (p *blockExecutionProfile) record(
 	}
 	p.total += duration
 	if duration >= slowTransactionExecutionThreshold {
+		var tracedMs int64
+		for _, stage := range stages {
+			tracedMs += stage.ExclusiveMs
+		}
+		untracedMs := payloadDuration.Milliseconds() - tracedMs
+		if untracedMs < 0 {
+			untracedMs = 0
+		}
 		p.slowTxs = append(p.slowTxs, slowTransactionExecution{
 			Hash:        txHash.String(),
 			PayloadType: key.payloadType,
@@ -215,6 +227,8 @@ func (p *blockExecutionProfile) record(
 			DurationMs:  duration.Milliseconds(),
 			PayloadMs:   payloadDuration.Milliseconds(),
 			OverheadMs:  overheadDuration.Milliseconds(),
+			TracedMs:    tracedMs,
+			UntracedMs:  untracedMs,
 		})
 	}
 }

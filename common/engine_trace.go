@@ -10,6 +10,7 @@ const (
 	EngineTraceKindAction     = "action"
 	EngineTraceKindPrecompile = "precompile"
 	EngineTraceKindSQL        = "sql"
+	EngineTraceKindRuntime    = "runtime"
 )
 
 // EngineTrace collects exclusive-time Engine.Call stages for one transaction.
