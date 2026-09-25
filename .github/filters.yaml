@@ -1,5 +1,6 @@
 code:
   - added|modified: 'go.mod'
+  - added|modified: 'Taskfile.yml'
   - added|modified: '.github/filters.yaml'
   - added|modified: '.github/workflows/ci.yaml'
   - added|modified: 'contrib/docker/kwild.dockerfile'
