@@ -46,7 +46,6 @@ jobs:
     # below, before the tests that need it.
 
     steps:
-      # shared setup for all tests
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -58,33 +57,15 @@ jobs:
           # higher Github API rate limiting
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      #ubuntu-latest has go 1.21 installed https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md#go
-      #self-hosted also has go 1.21 installed
-      #the default behavior here will load pre-installed go version
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
           check-latest: true
-          #cache: false
-
-      - name: Install tools
-        run: |
-          go version
-          task tools
-
-      # checks
-      #- name: Ensure generate antlr Go code is up-to-date
-      #  run: |
-      #    ./scripts/kuneiform/check_tidy
 
       - name: Initialize Go workspace
         run: |
           task work
-
-      - name: Compile packages, apps, and specs
-        run: |
-          go build -mod=readonly ./... ./core/...
 
       - name: Lint
         uses: golangci/golangci-lint-action@v6.5.0
@@ -93,8 +74,8 @@ jobs:
           version: "latest"
           args: ./... ./core/... --timeout=10m --config=.golangci.yml
 
-      # postgres for the unit and acceptance tests, built locally since the
-      # image is not published to a registry
+      # postgres for the unit tests, built locally since the image is not
+      # published to a registry
       - name: Build postgres image
         run: |
           task pg:image
@@ -117,81 +98,78 @@ jobs:
           docker logs kwil-ci-postgres >&2
           exit 1
 
-      # unit test
       - name: Run unit test
         run: |
           task test:unit
 
-      # acceptance test
-      - name: manual git tag
-        run: |
-          version=`echo ${{ github.sha }} | cut -c 1-7`
-          echo "GIT_TAG=$version" >> $GITHUB_ENV
-        #run: echo "GIT_TAG=`git describe --match 'v[0-9]*' --dirty --always --tags | sed 's/^v//'`" >> $GITHUB_ENV
-
-      - name: manual build time
-        run: |
-          build_time=`TZ=UTC date -u --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +"%Y-%m-%dT%H:%M:%SZ"`
-          echo "BUILD_TIME=$build_time" >> $GITHUB_ENV
-
-      - name: Build cli binaries
-        run: |
-          task build:cli
-          task build:kwild
-
       - name: compile the core/client/example app
         run: go build -o /dev/null
         working-directory: core/client/example
-  #
-  #      - name: compile the core/gatewayclient/example app
-  #        run: go build -o /dev/null
-  #        working-directory: core/gatewayclient/example
 
-      - name: Generate go vendor
+  acceptance:
+    needs: changes
+    if: ${{ needs.changes.outputs.run == 'true' && !github.event.pull_request.draft}}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Taskfile
+        uses: arduino/setup-task@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          check-latest: true
+
+      - name: Initialize Go workspace
         run: |
-          task vendor
+          task work
+
+      # acceptance compose files use kwil-postgres:16.15-1, which is not published
+      - name: Build postgres image
+        run: |
+          task pg:image
+
+      # Built on the runner so setup-go's build cache is reused; compiling
+      # inside Docker starts cold on every source change.
+      - name: Build kwild and kwil-cli
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          task build:kwild
+          task build:cli
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Cache Docker layers for kwild # both restore and save
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache-kwild
-          key: ${{ runner.os }}-buildx-kwild-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-kwild
+        id: buildx
 
       - name: Build kwild image
-        id: docker_build_kwild
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: .build
           load: true
           builder: ${{ steps.buildx.outputs.name }}
-          build-args: |
-            git_commit=${{ github.sha }}
-            version=${{ env.GIT_TAG }}
-            build_time=${{ env.BUILD_TIME }}
-          #  go_race=-race
-          file: ./contrib/docker/kwild.dockerfile
+          file: ./contrib/docker/kwild.ci.dockerfile
           push: false
           tags: kwild:latest
-          cache-from: type=local,src=/tmp/.buildx-cache-kwild
-          cache-to: type=local,dest=/tmp/.buildx-cache-kwild-new
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Run acceptance test
         run: |
           testUserID=$(id -u)
           testGroupID=$(id -g)
           KACT_LOG_LEVEL=warn task test:act:nb -- -ugid "$testUserID:$testGroupID"
-
-      # integration tests take too long, we only manually trigger it
-
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache-kwild
-          mv /tmp/.buildx-cache-kwild-new /tmp/.buildx-cache-kwild
 
       - name: Prune Docker
         if: ${{ always() }}
