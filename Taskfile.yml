@@ -252,10 +252,10 @@ tasks:
         core_pkgs=$(cd core && go list -tags=ext_test ./...)
         other=$(printf '%s\n' "$root_pkgs" "$core_pkgs" | grep -vxF -f "$pglive_list" || [ $? -eq 1 ])
         if [ -n "$other" ]; then
-          go test -tags=ext_test $other
+          go test -mod=readonly -tags=ext_test $other
         fi
         # -p=1: these packages all connect to kwil_test_db.
-        go test -tags=ext_test,pglive -count=1 -p=1 $(cat "$pglive_list")
+        go test -mod=readonly -tags=ext_test,pglive -count=1 -p=1 $(cat "$pglive_list")
         rm -f "$pglive_list"
 
   test:unit:race:

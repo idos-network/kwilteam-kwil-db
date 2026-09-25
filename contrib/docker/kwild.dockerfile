@@ -10,6 +10,12 @@ WORKDIR /app
 RUN mkdir -p /var/run/kwil
 RUN chmod 777 /var/run/kwil
 
+# Dependency download stays cached when only source changes.
+COPY go.mod go.sum ./
+COPY core/go.mod core/go.sum core/
+COPY test/go.mod test/go.sum test/
+RUN go work init . ./core ./test && go work sync
+
 COPY . .
 
 RUN rm -f go.work && go work init . ./core ./test
