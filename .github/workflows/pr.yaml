@@ -140,15 +140,14 @@ jobs:
         run: |
           task pg:image
 
-      - name: manual git tag
+      # Built on the runner so setup-go's build cache is reused; compiling
+      # inside Docker starts cold on every source change.
+      - name: Build kwild and kwil-cli
+        env:
+          CGO_ENABLED: "0"
         run: |
-          version=`echo ${{ github.sha }} | cut -c 1-7`
-          echo "GIT_TAG=$version" >> $GITHUB_ENV
-
-      - name: manual build time
-        run: |
-          build_time=`TZ=UTC date -u --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +"%Y-%m-%dT%H:%M:%SZ"`
-          echo "BUILD_TIME=$build_time" >> $GITHUB_ENV
+          task build:kwild
+          task build:cli
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -157,14 +156,10 @@ jobs:
       - name: Build kwild image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: .build
           load: true
           builder: ${{ steps.buildx.outputs.name }}
-          build-args: |
-            git_commit=${{ github.sha }}
-            version=${{ env.GIT_TAG }}
-            build_time=${{ env.BUILD_TIME }}
-          file: ./contrib/docker/kwild.dockerfile
+          file: ./contrib/docker/kwild.ci.dockerfile
           push: false
           tags: kwild:latest
           cache-from: type=gha
