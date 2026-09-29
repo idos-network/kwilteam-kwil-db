@@ -443,6 +443,14 @@ func isProtocolNotSupportedError(err error) bool {
 
 // downloadChunkResumable resumes a download from a specific offset
 func (s *StateSyncService) downloadChunkResumable(ctx context.Context, snap *snapshotMetadata, provider peer.AddrInfo, index uint32, bytesDownloaded uint64, filePath string) error {
+	// Reject a leftover temp file before dialing. A failed dial would otherwise
+	// skip the size check below and leave the file in place.
+	tempPath := filePath + ".tmp"
+	if info, err := os.Stat(tempPath); err == nil && info.Size() > snapshotter.ChunkSize {
+		os.Remove(tempPath)
+		return fmt.Errorf("snapshot chunk exceeds maximum size %d", snapshotter.ChunkSize)
+	}
+
 	// Create a context with stream timeout for libp2p operations
 	streamCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.StreamTimeout))
 	defer cancel()

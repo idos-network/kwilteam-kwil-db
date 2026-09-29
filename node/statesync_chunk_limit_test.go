@@ -2,10 +2,14 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/trufnetwork/kwil-db/node/snapshotter"
 )
 
@@ -28,5 +32,30 @@ func TestCopyLimited(t *testing.T) {
 
 	if _, err := copyLimited(io.Discard, strings.NewReader("x"), -1); err == nil {
 		t.Fatal("expected error for negative limit")
+	}
+}
+
+func TestDownloadChunkResumableRejectsOversizedTempFile(t *testing.T) {
+	dir := t.TempDir()
+	finalPath := filepath.Join(dir, "chunk-0.sql.gz")
+	tempPath := finalPath + ".tmp"
+	f, err := os.Create(tempPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(snapshotter.ChunkSize + 1); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	f.Close()
+
+	// host is nil: the size check must return before NewStream.
+	s := &StateSyncService{}
+	err = s.downloadChunkResumable(context.Background(), &snapshotMetadata{}, peer.AddrInfo{}, 0, 0, finalPath)
+	if err == nil {
+		t.Fatal("expected oversized chunk error")
+	}
+	if _, statErr := os.Stat(tempPath); !os.IsNotExist(statErr) {
+		t.Fatalf("oversized temp file still present: %v", statErr)
 	}
 }
