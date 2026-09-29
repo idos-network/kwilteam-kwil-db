@@ -34,30 +34,22 @@ func (cr ConsensusReset) MarshalBinary() ([]byte, error) {
 }
 
 func (cr *ConsensusReset) UnmarshalBinary(data []byte) error {
-	if len(data) < 16 {
+	// The count must match the bytes present. Allocating from the claimed
+	// count lets a 16-byte message request an enormous slice and crash the process.
+	if len(data) < 16 || (len(data)-16)%HashLen != 0 {
 		return errors.New("invalid ConsensusReset data")
 	}
-
-	buf := bytes.NewBuffer(data)
-
-	var height uint64
-	if err := binary.Read(buf, binary.LittleEndian, &height); err != nil {
-		return err
+	n := (len(data) - 16) / HashLen
+	if binary.LittleEndian.Uint64(data[8:16]) != uint64(n) {
+		return errors.New("invalid ConsensusReset tx count")
 	}
-	cr.ToHeight = int64(height)
 
-	var numTxIDs uint64
-	if err := binary.Read(buf, binary.LittleEndian, &numTxIDs); err != nil {
-		return err
-	}
-	cr.TxIDs = make([]Hash, numTxIDs)
-
+	cr.ToHeight = int64(binary.LittleEndian.Uint64(data[:8]))
+	cr.TxIDs = make([]Hash, n)
+	payload := data[16:]
 	for i := range cr.TxIDs {
-		if _, err := buf.Read(cr.TxIDs[i][:]); err != nil {
-			return err
-		}
+		copy(cr.TxIDs[i][:], payload[i*HashLen:(i+1)*HashLen])
 	}
-
 	return nil
 }
 

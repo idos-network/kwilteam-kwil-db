@@ -61,7 +61,31 @@ func TestConsensusReset_MarshalUnmarshal(t *testing.T) {
 	}
 }
 
+func TestConsensusReset_RoundTripTxIDs(t *testing.T) {
+	cr := ConsensusReset{
+		ToHeight: 42,
+		TxIDs:    []Hash{{1}, {2, 3}},
+	}
+	data, err := cr.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded ConsensusReset
+	if err := decoded.UnmarshalBinary(data); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.ToHeight != cr.ToHeight || len(decoded.TxIDs) != len(cr.TxIDs) || decoded.TxIDs[0] != cr.TxIDs[0] || decoded.TxIDs[1] != cr.TxIDs[1] {
+		t.Fatalf("round trip: got height %d txIDs %x", decoded.ToHeight, decoded.TxIDs)
+	}
+}
+
 func TestConsensusReset_UnmarshalInvalid(t *testing.T) {
+	huge := make([]byte, 16)
+	binary.LittleEndian.PutUint64(huge[8:], 1<<43) // 32-byte hashes would be 256 TiB
+
+	mismatch := make([]byte, 16+HashLen)
+	binary.LittleEndian.PutUint64(mismatch[8:], 2) // claims 2, carries 1
+
 	tests := []struct {
 		name    string
 		data    []byte
@@ -85,6 +109,21 @@ func TestConsensusReset_UnmarshalInvalid(t *testing.T) {
 		{
 			name:    "excess data",
 			data:    bytes.Repeat([]byte{1}, 9),
+			wantErr: true,
+		},
+		{
+			name:    "tx count exceeds payload",
+			data:    huge,
+			wantErr: true,
+		},
+		{
+			name:    "tx count does not match payload",
+			data:    mismatch,
+			wantErr: true,
+		},
+		{
+			name:    "truncated tx id",
+			data:    bytes.Repeat([]byte{1}, 16+1),
 			wantErr: true,
 		},
 	}
