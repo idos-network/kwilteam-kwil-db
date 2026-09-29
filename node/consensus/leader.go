@@ -326,33 +326,25 @@ func (ce *ConsensusEngine) addVote(ctx context.Context, voteMsg *vote, sender st
 			ce.log.Warn("Invalid vote: out-of-sync proof verification failed")
 			return nil // ignore, not a leader failure
 		}
-
-		// received a valid out-of-sync proof
-		ce.log.Warn("Received out-of-sync proof from the validator, resetting the state and initiating the catchup mode", "from", vote.Height, "to", proof.Header.Height)
-
-		// rollback current block execution
-		if err := ce.rollbackState(ctx); err != nil {
-			return fmt.Errorf("error resetting the state: %w", err)
+		// A leader signature only shows this node proposed that header. The
+		// in-progress proposal, and any older header, are already known here.
+		if proof.Header.Height <= ce.state.blkProp.height {
+			ce.log.Warn("ignoring out-of-sync proof that is not ahead of the current proposal",
+				"proofHeight", proof.Header.Height, "proposalHeight", ce.state.blkProp.height, "from", sender)
+			return nil
+		}
+		if ce.state.lc == nil {
+			ce.log.Warn("ignoring out-of-sync proof: no last commit", "from", sender)
+			return nil
 		}
 
-		// trigger block sync to catch up with the network till the height specified in the out-of-sync proof
-		go func() {
-			if err := ce.syncBlocksUntilHeight(ctx, ce.state.lc.height+1, proof.Header.Height); err != nil {
-				if err != types.ErrBlkNotFound {
-					haltReason := fmt.Sprintf("Error syncing blocks: %v", err)
-					ce.sendHalt(haltReason)
-					return
-				}
-
-				// if the block is not found, maybe retry>? or just move on to the next round
-				// and let the leader propose a new block, and the validator can refute it
-				// until it catches up.
-			}
-
-			if ce.role.Load() == types.RoleLeader {
-				ce.newRound <- struct{}{} // signal ce to start a new round
-			}
-		}()
+		propHeight := ce.state.blkProp.height
+		propHash := ce.state.blkProp.blkHash
+		startHeight := ce.state.lc.height + 1
+		endHeight := proof.Header.Height
+		ce.log.Warn("received out-of-sync proof; confirming the next block exists before resetting",
+			"from", propHeight, "to", endHeight, "sender", sender)
+		ce.beginOutOfSyncCatchup(ctx, propHeight, propHash, startHeight, endHeight)
 
 		return nil
 	}
@@ -401,6 +393,102 @@ func (ce *ConsensusEngine) addVote(ctx context.Context, voteMsg *vote, sender st
 
 	ce.processVotes(ctx)
 	return nil
+}
+
+// beginOutOfSyncCatchup starts one catch-up for this proposal, or raises the
+// height an in-flight catch-up will sync through. Caller holds ce.state.mtx.
+func (ce *ConsensusEngine) beginOutOfSyncCatchup(ctx context.Context, propHeight int64, propHash types.Hash, startHeight, endHeight int64) {
+	if ce.state.catchupOn && ce.state.catchupProp == propHeight && ce.state.catchupHash == propHash {
+		if endHeight > ce.state.catchupEnd {
+			ce.state.catchupEnd = endHeight
+		}
+		return
+	}
+
+	ce.state.catchupGen++
+	ce.state.catchupOn = true
+	ce.state.catchupProp = propHeight
+	ce.state.catchupHash = propHash
+	ce.state.catchupStart = startHeight
+	ce.state.catchupEnd = endHeight
+	go ce.catchUpFromOutOfSync(ctx, ce.state.catchupGen)
+}
+
+// catchUpFromOutOfSync resets the in-progress proposal only after peers can
+// serve the next block. A leader-signed header that no peer can serve must not
+// abort the round or halt the node. The sync target is the greatest end height
+// recorded for this run, including proofs that arrive while the next block is
+// being fetched.
+func (ce *ConsensusEngine) catchUpFromOutOfSync(ctx context.Context, gen uint64) {
+	ce.state.mtx.Lock()
+	if ce.state.catchupGen != gen {
+		ce.state.mtx.Unlock()
+		return
+	}
+	startHeight := ce.state.catchupStart
+	propHeight := ce.state.catchupProp
+	propHash := ce.state.catchupHash
+	ce.state.mtx.Unlock()
+
+	if _, _, _, err := ce.getBlockWithRetry(ctx, startHeight); err != nil {
+		ce.log.Warn("ignoring out-of-sync proof: next block is not available", "height", startHeight, "err", err)
+		ce.endOutOfSyncCatchup(gen)
+		return
+	}
+
+	ce.state.mtx.Lock()
+	if ce.state.catchupGen != gen || ce.state.blkProp == nil || ce.state.blkProp.height != propHeight || ce.state.blkProp.blkHash != propHash {
+		if ce.state.catchupGen == gen {
+			ce.state.catchupOn = false
+		}
+		ce.state.mtx.Unlock()
+		ce.log.Info("out-of-sync catchup skipped: proposal already finished", "height", propHeight)
+		return
+	}
+	endHeight := ce.state.catchupEnd
+	if err := ce.rollbackState(ctx); err != nil {
+		if ce.state.catchupGen == gen {
+			ce.state.catchupOn = false
+		}
+		ce.state.mtx.Unlock()
+		ce.log.Errorf("error resetting the state: %v", err)
+		return
+	}
+	ce.state.mtx.Unlock()
+
+	synced := startHeight - 1
+	for synced < endHeight {
+		ce.log.Info("out-of-sync catchup", "from", synced+1, "to", endHeight)
+		if err := ce.syncBlocksUntilHeight(ctx, synced+1, endHeight); err != nil {
+			if errors.Is(err, types.ErrBlkNotFound) || errors.Is(err, types.ErrNotFound) {
+				ce.log.Warn("out-of-sync catchup stopped: block not available", "err", err)
+			} else {
+				ce.sendHalt(fmt.Sprintf("Error syncing blocks: %v", err))
+				ce.endOutOfSyncCatchup(gen)
+				return
+			}
+			break
+		}
+		synced = endHeight
+		ce.state.mtx.Lock()
+		if ce.state.catchupGen == gen && ce.state.catchupEnd > endHeight {
+			endHeight = ce.state.catchupEnd
+		}
+		ce.state.mtx.Unlock()
+	}
+
+	ce.endOutOfSyncCatchup(gen)
+	if ce.role.Load() == types.RoleLeader {
+		ce.newRound <- struct{}{}
+	}
+}
+
+func (ce *ConsensusEngine) endOutOfSyncCatchup(gen uint64) {
+	ce.state.mtx.Lock()
+	defer ce.state.mtx.Unlock()
+	if ce.state.catchupGen == gen {
+		ce.state.catchupOn = false
+	}
 }
 
 // ProcessVotes processes the votes received from the validators.

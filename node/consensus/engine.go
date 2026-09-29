@@ -295,6 +295,16 @@ type state struct {
 	// this leader update. This field is applicable only to the promoted leader
 	// and only on the block heights where the node became a new leader through the replace cmd.
 	leaderUpdate *leaderUpdate
+
+	// One out-of-sync catch-up for the proposal that started it. Later proofs for
+	// that same proposal raise catchupEnd; they do not start another worker.
+	// catchupGen lets a finished worker ignore a newer run.
+	catchupOn    bool
+	catchupGen   uint64
+	catchupProp  int64
+	catchupHash  types.Hash
+	catchupStart int64
+	catchupEnd   int64
 }
 
 type blockResult struct {
