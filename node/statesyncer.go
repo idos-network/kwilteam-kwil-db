@@ -443,6 +443,14 @@ func isProtocolNotSupportedError(err error) bool {
 
 // downloadChunkResumable resumes a download from a specific offset
 func (s *StateSyncService) downloadChunkResumable(ctx context.Context, snap *snapshotMetadata, provider peer.AddrInfo, index uint32, bytesDownloaded uint64, filePath string) error {
+	// Reject a leftover temp file before dialing. A failed dial would otherwise
+	// skip the size check below and leave the file in place.
+	tempPath := filePath + ".tmp"
+	if info, err := os.Stat(tempPath); err == nil && info.Size() > snapshotter.ChunkSize {
+		os.Remove(tempPath)
+		return fmt.Errorf("snapshot chunk exceeds maximum size %d", snapshotter.ChunkSize)
+	}
+
 	// Create a context with stream timeout for libp2p operations
 	streamCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.StreamTimeout))
 	defer cancel()
@@ -519,9 +527,15 @@ func (s *StateSyncService) downloadChunkResumable(ctx context.Context, snap *sna
 		}
 	}()
 
+	if bytesDownloaded > uint64(snapshotter.ChunkSize) {
+		return fmt.Errorf("snapshot chunk exceeds maximum size %d", snapshotter.ChunkSize)
+	}
+	// Cap at the protocol chunk size so a peer cannot fill the disk before the hash check.
+	remaining := snapshotter.ChunkSize - int64(bytesDownloaded)
+
 	// Copy remaining data from stream
 	copyStartTime := time.Now()
-	bytesWritten, err := io.Copy(file, stream)
+	bytesWritten, err := copyLimited(file, stream, remaining)
 	if err != nil {
 		// Don't clean up temp file on network errors - preserve for resume
 		cleanupTempFile = false
@@ -978,6 +992,16 @@ func (s *StateSyncService) validateChunkHash(filePath string, expectedHash [32]b
 	return nil
 }
 
+// copyLimited copies at most max bytes from src to dst.
+// Snapshot chunks are produced at snapshotter.ChunkSize, so a longer stream is
+// not a valid chunk and must not be written to disk.
+func copyLimited(dst io.Writer, src io.Reader, max int64) (int64, error) {
+	if max < 0 {
+		return 0, fmt.Errorf("snapshot chunk exceeds maximum size %d", snapshotter.ChunkSize)
+	}
+	return io.Copy(dst, io.LimitReader(src, max))
+}
+
 // downloadChunkLegacy performs a legacy download (original implementation)
 func (s *StateSyncService) downloadChunkLegacy(ctx context.Context, snap *snapshotMetadata, provider peer.AddrInfo, index uint32, startTime time.Time) error {
 	// Create a context with stream timeout for libp2p operations
@@ -1035,8 +1059,8 @@ func (s *StateSyncService) downloadChunkLegacy(ctx context.Context, snap *snapsh
 		}
 	}()
 
-	// Copy data from stream to temporary file
-	bytesWritten, err := io.Copy(tempFile, stream)
+	// Copy data from stream to temporary file. Same cap as the range path.
+	bytesWritten, err := copyLimited(tempFile, stream, snapshotter.ChunkSize)
 	if err != nil {
 		return fmt.Errorf("failed to copy chunk data: %w", err)
 	}
