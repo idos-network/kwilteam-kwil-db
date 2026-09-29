@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"sync/atomic"
@@ -248,7 +249,7 @@ func TestCatchUpFromOutOfSyncKeepsRoundWhenNextBlockMissing(t *testing.T) {
 			return types.Hash{}, nil, nil, 0, errNotFound
 		}
 
-		ce.catchUpFromOutOfSync(context.Background(), 4, blkID, 4, 10)
+		runCatchup(ce, 4, blkID, 4, 10)
 
 		require.Equal(t, blkID, ce.state.blkProp.blkHash)
 		require.Empty(t, ce.haltChan)
@@ -265,7 +266,7 @@ func TestCatchUpFromOutOfSyncSkipsFinishedRound(t *testing.T) {
 		return types.Hash{1}, []byte{1}, &ktypes.CommitInfo{}, 0, nil
 	}
 
-	ce.catchUpFromOutOfSync(context.Background(), 4, types.Hash{1}, 4, 10)
+	runCatchup(ce, 4, types.Hash{1}, 4, 10)
 
 	require.Equal(t, types.Hash{2}, ce.state.blkProp.blkHash)
 	require.Empty(t, ce.haltChan)
@@ -290,11 +291,75 @@ func TestCatchUpFromOutOfSyncDoesNotHaltWhenSyncMissesBlock(t *testing.T) {
 		return types.Hash{}, nil, nil, 0, types.ErrBlkNotFound
 	}
 
-	ce.catchUpFromOutOfSync(context.Background(), 4, prop, 4, 10)
+	runCatchup(ce, 4, prop, 4, 10)
 
 	require.Nil(t, ce.state.blkProp)
 	require.Empty(t, ce.haltChan)
 	require.Len(t, ce.newRound, 1)
+}
+
+func TestOutOfSyncCatchupKeepsGreatestEndHeight(t *testing.T) {
+	ce, _ := testEngineWithValidators(t, 1)
+	var logs bytes.Buffer
+	ce.log = log.New(log.WithWriter(&logs), log.WithLevel(log.LevelInfo))
+	ce.haltChan = make(chan string, 1)
+	ce.newRound = make(chan struct{}, 1)
+	ce.role.Store(types.RoleLeader)
+	ce.blockProcessor = &stubBlockProcessor{}
+
+	prop := types.Hash{9}
+	ce.state.blkProp = &blockProposal{height: 4, blkHash: prop}
+	ce.state.lc = &lastCommit{height: 3}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	ce.blkRequester = func(context.Context, int64) (types.Hash, []byte, *ktypes.CommitInfo, int64, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+			return types.Hash{1}, []byte{1}, &ktypes.CommitInfo{}, 0, nil
+		}
+		return types.Hash{}, nil, nil, 0, types.ErrBlkNotFound
+	}
+
+	ce.state.mtx.Lock()
+	ce.beginOutOfSyncCatchup(context.Background(), 4, prop, 4, 10)
+	ce.state.mtx.Unlock()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected one catch-up fetch")
+	}
+
+	ce.state.mtx.Lock()
+	ce.beginOutOfSyncCatchup(context.Background(), 4, prop, 4, 30)
+	ce.beginOutOfSyncCatchup(context.Background(), 4, prop, 4, 12)
+	require.Equal(t, int64(30), ce.state.catchupEnd)
+	require.Equal(t, int32(1), calls.Load())
+	ce.state.mtx.Unlock()
+	close(release)
+
+	select {
+	case <-ce.newRound:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected the catch-up worker to finish")
+	}
+	require.Contains(t, logs.String(), "to=30")
+	require.NotContains(t, logs.String(), "to=10")
+	require.False(t, ce.state.catchupOn)
+	require.Empty(t, ce.haltChan)
+}
+
+func runCatchup(ce *ConsensusEngine, propHeight int64, propHash types.Hash, start, end int64) {
+	ce.state.catchupOn = true
+	ce.state.catchupGen = 1
+	ce.state.catchupProp = propHeight
+	ce.state.catchupHash = propHash
+	ce.state.catchupStart = start
+	ce.state.catchupEnd = end
+	ce.catchUpFromOutOfSync(context.Background(), 1)
 }
 
 func leaderSignedHeader(t *testing.T, key crypto.PrivateKey, height int64) *types.OutOfSyncProof {
