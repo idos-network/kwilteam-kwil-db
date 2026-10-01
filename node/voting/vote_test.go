@@ -394,10 +394,13 @@ func TestDropRetiredXrplAccessGrant(t *testing.T) {
 	require.NoError(t, err)
 	_, err = tx.Execute(ctx, insertEventIdempotent, resID[:], []byte("ag"), retiredXrplAccessGrantType)
 	require.NoError(t, err)
+	keepEventID := types.NewUUIDV5([]byte("keep-event"))
+	_, err = tx.Execute(ctx, insertEventIdempotent, keepEventID[:], []byte("other"), testType)
+	require.NoError(t, err)
 
 	_, err = InitializeVoteStore(ctx, tx)
 	require.NoError(t, err)
-	err = dropRetiredXrplEvents(ctx, tx)
+	_, err = initializeEventStore(ctx, txDB{tx})
 	require.NoError(t, err)
 
 	gone, err := tx.Execute(ctx, `SELECT name FROM `+votingSchemaName+`.resolution_types WHERE name = $1`, retiredXrplAccessGrantType)
@@ -415,6 +418,23 @@ func TestDropRetiredXrplAccessGrant(t *testing.T) {
 	events, err := tx.Execute(ctx, `SELECT id FROM `+schemaName+`.events WHERE event_type = $1`, retiredXrplAccessGrantType)
 	require.NoError(t, err)
 	require.Empty(t, events.Rows)
+	keptEvents, err := tx.Execute(ctx, `SELECT id FROM `+schemaName+`.events WHERE event_type = $1`, testType)
+	require.NoError(t, err)
+	require.Len(t, keptEvents.Rows, 1)
+	ver, err := tx.Execute(ctx, `SELECT version FROM `+schemaName+`._kwil_version WHERE name = 'version'`)
+	require.NoError(t, err)
+	require.Len(t, ver.Rows, 1)
+	got, ok := sql.Int64(ver.Rows[0][0])
+	require.True(t, ok)
+	require.Equal(t, int64(eventStoreVersion), got)
+}
+
+// txDB lets initializeEventStore run its upgrade inside the test transaction.
+// BeginReadTx is not used during initialization.
+type txDB struct{ sql.Tx }
+
+func (txDB) BeginReadTx(context.Context) (sql.OuterReadTx, error) {
+	return nil, fmt.Errorf("read-only tx is not used by initializeEventStore")
 }
 
 var testEvent = &types.VotableEvent{
