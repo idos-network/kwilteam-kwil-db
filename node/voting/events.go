@@ -46,7 +46,7 @@ import (
 const (
 	schemaName = `kwild_events`
 
-	eventStoreVersion = 1
+	eventStoreVersion = 2
 
 	// eventsTable is the SQL table definition for the events table.
 	// All the events in this table exist in one of the below states.
@@ -111,6 +111,10 @@ const (
 
 	// V0 to V1 migration
 	dropReceivedColumn = `ALTER TABLE ` + schemaName + `.events DROP COLUMN received;`
+
+	// V1 to V2: drop events left by the removed XRPL access-grant oracle.
+	// Local store only; not part of the consensus snapshot.
+	deleteRetiredXrplEvents = `DELETE FROM ` + schemaName + `.events WHERE event_type = '` + retiredXrplAccessGrantType + `';`
 )
 
 // DB is a database connection.
@@ -174,6 +178,7 @@ func initializeEventStore(ctx context.Context, writerDB DB) (*EventStore, error)
 	upgradeFns := map[int64]versioning.UpgradeFunc{
 		0: initEventsTables,
 		1: upgradeV0ToV1,
+		2: dropRetiredXrplEvents,
 	}
 
 	// NOTE: Upgrade runs the upgrades in a transaction (atomic)
@@ -199,6 +204,11 @@ func initEventsTables(ctx context.Context, tx sql.DB) error {
 func upgradeV0ToV1(ctx context.Context, db sql.DB) error {
 	// Drop the received column from the events table.
 	_, err := db.Execute(ctx, dropReceivedColumn)
+	return err
+}
+
+func dropRetiredXrplEvents(ctx context.Context, db sql.DB) error {
+	_, err := db.Execute(ctx, deleteRetiredXrplEvents)
 	return err
 }
 

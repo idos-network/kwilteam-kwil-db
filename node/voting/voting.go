@@ -60,6 +60,7 @@ func InitializeVoteStore(ctx context.Context, db sql.TxMaker) (*VoteStore, error
 		0: initVotingTables,
 		1: dropHeight,
 		2: dropExtraVoteIDColumn,
+		3: dropRetiredXrplAccessGrant,
 	}
 
 	err := versioning.Upgrade(ctx, db, votingSchemaName, upgradeFns, voteStoreVersion)
@@ -164,6 +165,11 @@ func dropHeight(ctx context.Context, db sql.DB) error {
 
 func dropExtraVoteIDColumn(ctx context.Context, db sql.DB) error {
 	_, err := db.Execute(ctx, dropExtraVoteID)
+	return err
+}
+
+func dropRetiredXrplAccessGrant(ctx context.Context, db sql.DB) error {
+	_, err := db.Execute(ctx, deleteRetiredXrplAccessGrantType)
 	return err
 }
 
