@@ -390,6 +390,13 @@ func TestDropRetiredXrplAccessGrant(t *testing.T) {
 	_, err = tx.Execute(ctx, `INSERT INTO `+votingSchemaName+`.resolutions (id, body, type, expiration) VALUES ($1, $2, $3, $4)`,
 		resID[:], []byte("ag"), typeID[:], int64(1))
 	require.NoError(t, err)
+	voterID := types.NewUUIDV5([]byte("voter"))
+	_, err = tx.Execute(ctx, `INSERT INTO `+votingSchemaName+`.voters (id, name, power) VALUES ($1, $2, $3)`,
+		voterID[:], []byte("voter"), int64(1))
+	require.NoError(t, err)
+	_, err = tx.Execute(ctx, `INSERT INTO `+votingSchemaName+`.votes (resolution_id, voter_id) VALUES ($1, $2)`,
+		resID[:], voterID[:])
+	require.NoError(t, err)
 	_, err = tx.Execute(ctx, `INSERT INTO `+votingSchemaName+`.processed (id) VALUES ($1)`, resID[:])
 	require.NoError(t, err)
 	_, err = tx.Execute(ctx, insertEventIdempotent, resID[:], []byte("ag"), retiredXrplAccessGrantType)
@@ -412,6 +419,9 @@ func TestDropRetiredXrplAccessGrant(t *testing.T) {
 	pending, err := tx.Execute(ctx, `SELECT id FROM `+votingSchemaName+`.resolutions WHERE id = $1`, resID[:])
 	require.NoError(t, err)
 	require.Empty(t, pending.Rows)
+	votes, err := tx.Execute(ctx, `SELECT resolution_id FROM `+votingSchemaName+`.votes WHERE resolution_id = $1`, resID[:])
+	require.NoError(t, err)
+	require.Empty(t, votes.Rows)
 	processed, err := tx.Execute(ctx, `SELECT id FROM `+votingSchemaName+`.processed WHERE id = $1`, resID[:])
 	require.NoError(t, err)
 	require.Len(t, processed.Rows, 1)
