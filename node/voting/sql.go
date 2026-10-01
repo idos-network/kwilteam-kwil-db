@@ -36,7 +36,7 @@ processed:
 const (
 	votingSchemaName = `kwild_voting`
 
-	voteStoreVersion = 2
+	voteStoreVersion = 3
 
 	// tableResolutions is the sql table used to store resolutions that can be voted on.
 	// the vote_body_proposer is the BYTEA of the public key of the submitter, NOT the UUID
@@ -243,6 +243,16 @@ const (
 // upgrades V1 -> V2
 const (
 	dropExtraVoteID = `ALTER TABLE ` + votingSchemaName + `.resolutions DROP COLUMN extra_vote_id;`
+)
+
+// retiredXrplAccessGrantType is the XRPL access-grant oracle resolution.
+// The listener and resolution were removed; v3 drops the type so nodes can
+// start. resolutions.type and votes.resolution_id cascade on delete.
+const retiredXrplAccessGrantType = "xrpl_access_grant"
+
+// upgrades V2 -> V3
+const (
+	deleteRetiredXrplAccessGrantType = `DELETE FROM ` + votingSchemaName + `.resolution_types WHERE name = '` + retiredXrplAccessGrantType + `';`
 )
 
 // registered resolution types

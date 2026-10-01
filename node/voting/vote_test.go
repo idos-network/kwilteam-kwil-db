@@ -14,6 +14,7 @@ import (
 	"github.com/trufnetwork/kwil-db/extensions/resolutions"
 	dbtest "github.com/trufnetwork/kwil-db/node/pg/test"
 	"github.com/trufnetwork/kwil-db/node/types/sql"
+	"github.com/trufnetwork/kwil-db/node/versioning"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -356,6 +357,95 @@ func Test_Voting(t *testing.T) {
 			tt.fn(t, dbTx, v)
 		})
 	}
+}
+
+func TestDropRetiredXrplAccessGrant(t *testing.T) {
+	ctx := context.Background()
+	db := dbtest.NewTestDB(t, nil)
+
+	tx, err := db.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
+	err = versioning.Upgrade(ctx, tx, votingSchemaName, map[int64]versioning.UpgradeFunc{
+		0: initVotingTables,
+		1: dropHeight,
+		2: dropExtraVoteIDColumn,
+	}, 2)
+	require.NoError(t, err)
+	err = versioning.Upgrade(ctx, tx, schemaName, map[int64]versioning.UpgradeFunc{
+		0: initEventsTables,
+		1: upgradeV0ToV1,
+	}, 1)
+	require.NoError(t, err)
+
+	typeID := types.NewUUIDV5([]byte(retiredXrplAccessGrantType))
+	_, err = tx.Execute(ctx, createResolutionType, typeID[:], retiredXrplAccessGrantType)
+	require.NoError(t, err)
+	keepID := types.NewUUIDV5([]byte(testType))
+	_, err = tx.Execute(ctx, createResolutionType, keepID[:], testType)
+	require.NoError(t, err)
+
+	resID := types.NewUUIDV5([]byte("pending-xrpl-ag"))
+	_, err = tx.Execute(ctx, `INSERT INTO `+votingSchemaName+`.resolutions (id, body, type, expiration) VALUES ($1, $2, $3, $4)`,
+		resID[:], []byte("ag"), typeID[:], int64(1))
+	require.NoError(t, err)
+	voterName := encodePubKey([]byte("voter-key"), crypto.KeyTypeEd25519)
+	voterID := types.NewUUIDV5(voterName)
+	_, err = tx.Execute(ctx, `INSERT INTO `+votingSchemaName+`.voters (id, name, power) VALUES ($1, $2, $3)`,
+		voterID[:], voterName, int64(1))
+	require.NoError(t, err)
+	_, err = tx.Execute(ctx, `INSERT INTO `+votingSchemaName+`.votes (resolution_id, voter_id) VALUES ($1, $2)`,
+		resID[:], voterID[:])
+	require.NoError(t, err)
+	_, err = tx.Execute(ctx, `INSERT INTO `+votingSchemaName+`.processed (id) VALUES ($1)`, resID[:])
+	require.NoError(t, err)
+	_, err = tx.Execute(ctx, insertEventIdempotent, resID[:], []byte("ag"), retiredXrplAccessGrantType)
+	require.NoError(t, err)
+	keepEventID := types.NewUUIDV5([]byte("keep-event"))
+	_, err = tx.Execute(ctx, insertEventIdempotent, keepEventID[:], []byte("other"), testType)
+	require.NoError(t, err)
+
+	_, err = InitializeVoteStore(ctx, tx)
+	require.NoError(t, err)
+	_, err = initializeEventStore(ctx, txDB{tx})
+	require.NoError(t, err)
+
+	gone, err := tx.Execute(ctx, `SELECT name FROM `+votingSchemaName+`.resolution_types WHERE name = $1`, retiredXrplAccessGrantType)
+	require.NoError(t, err)
+	require.Empty(t, gone.Rows)
+	kept, err := tx.Execute(ctx, `SELECT name FROM `+votingSchemaName+`.resolution_types WHERE name = $1`, testType)
+	require.NoError(t, err)
+	require.Len(t, kept.Rows, 1)
+	pending, err := tx.Execute(ctx, `SELECT id FROM `+votingSchemaName+`.resolutions WHERE id = $1`, resID[:])
+	require.NoError(t, err)
+	require.Empty(t, pending.Rows)
+	votes, err := tx.Execute(ctx, `SELECT resolution_id FROM `+votingSchemaName+`.votes WHERE resolution_id = $1`, resID[:])
+	require.NoError(t, err)
+	require.Empty(t, votes.Rows)
+	processed, err := tx.Execute(ctx, `SELECT id FROM `+votingSchemaName+`.processed WHERE id = $1`, resID[:])
+	require.NoError(t, err)
+	require.Len(t, processed.Rows, 1)
+	events, err := tx.Execute(ctx, `SELECT id FROM `+schemaName+`.events WHERE event_type = $1`, retiredXrplAccessGrantType)
+	require.NoError(t, err)
+	require.Empty(t, events.Rows)
+	keptEvents, err := tx.Execute(ctx, `SELECT id FROM `+schemaName+`.events WHERE event_type = $1`, testType)
+	require.NoError(t, err)
+	require.Len(t, keptEvents.Rows, 1)
+	ver, err := tx.Execute(ctx, `SELECT version FROM `+schemaName+`._kwil_version WHERE name = 'version'`)
+	require.NoError(t, err)
+	require.Len(t, ver.Rows, 1)
+	got, ok := sql.Int64(ver.Rows[0][0])
+	require.True(t, ok)
+	require.Equal(t, int64(eventStoreVersion), got)
+}
+
+// txDB lets initializeEventStore run its upgrade inside the test transaction.
+// BeginReadTx is not used during initialization.
+type txDB struct{ sql.Tx }
+
+func (txDB) BeginReadTx(context.Context) (sql.OuterReadTx, error) {
+	return nil, fmt.Errorf("read-only tx is not used by initializeEventStore")
 }
 
 var testEvent = &types.VotableEvent{
