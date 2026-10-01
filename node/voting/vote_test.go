@@ -390,9 +390,10 @@ func TestDropRetiredXrplAccessGrant(t *testing.T) {
 	_, err = tx.Execute(ctx, `INSERT INTO `+votingSchemaName+`.resolutions (id, body, type, expiration) VALUES ($1, $2, $3, $4)`,
 		resID[:], []byte("ag"), typeID[:], int64(1))
 	require.NoError(t, err)
-	voterID := types.NewUUIDV5([]byte("voter"))
+	voterName := encodePubKey([]byte("voter-key"), crypto.KeyTypeEd25519)
+	voterID := types.NewUUIDV5(voterName)
 	_, err = tx.Execute(ctx, `INSERT INTO `+votingSchemaName+`.voters (id, name, power) VALUES ($1, $2, $3)`,
-		voterID[:], []byte("voter"), int64(1))
+		voterID[:], voterName, int64(1))
 	require.NoError(t, err)
 	_, err = tx.Execute(ctx, `INSERT INTO `+votingSchemaName+`.votes (resolution_id, voter_id) VALUES ($1, $2)`,
 		resID[:], voterID[:])
