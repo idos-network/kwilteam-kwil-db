@@ -297,6 +297,11 @@ func (r *TxApp) processVotes(ctx context.Context, db sql.DB, block *common.Block
 		}
 
 		for _, resolution := range finalized {
+			// Already expired: the expiry loop handles it. Confirming here would apply it.
+			if resolutionExpired(resolution.Expiration, block.Timestamp) {
+				continue
+			}
+
 			credits.applyResolution(resolution)
 			finalizedIDs = append(finalizedIDs, resolution.ID)
 
@@ -448,6 +453,11 @@ func (r *TxApp) processVotes(ctx context.Context, db sql.DB, block *common.Block
 	}
 
 	return expiredJoins, nil
+}
+
+// resolutionExpired is true when expiration <= blockTime, matching the expiry query.
+func resolutionExpired(expiration time.Time, blockTime int64) bool {
+	return expiration.Unix() <= blockTime
 }
 
 var (
