@@ -4,6 +4,7 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -696,22 +697,20 @@ func (s *StateSyncService) restoreDB(ctx context.Context, snapshot *snapshotMeta
 	}
 	defer reader.Close()
 
-	return restoreDB(ctx, reader, s.dbConfig, snapshot.Hash, s.cfg.PsqlPath, true, s.snapshotDir, s.log)
+	return restoreDB(ctx, reader, s.dbConfig, snapshot.Hash, s.cfg.PsqlPath, s.snapshotDir, s.log)
 }
 
-// RestoreDB restores a genesis or migration dump, which is trusted and already
-// carries its own \restrict pair when produced by pg_dump 16.15+. Adding a
-// second restriction would nest the keys and fail the import, so only the
-// state-sync path, whose bytes come from a remote provider, restricts.
+// RestoreDB restores a genesis or migration dump. Migration dumps are snapshot
+// bytes from migrate_from, so they are restricted the same way as state sync.
 //
 // The dump hash is verified before psql starts. On import failure it waits for
 // psql and drops leftover kwild_/ds_* schemas so a partial restore cannot be
 // treated as initialized state on restart.
 func RestoreDB(ctx context.Context, reader io.Reader, db config.DBConfig, snapshotHash []byte, stagingDir string, logger log.Logger) error {
-	return restoreDB(ctx, reader, db, snapshotHash, "psql", false, stagingDir, logger)
+	return restoreDB(ctx, reader, db, snapshotHash, "psql", stagingDir, logger)
 }
 
-func restoreDB(ctx context.Context, reader io.Reader, db config.DBConfig, snapshotHash []byte, psqlPath string, restrictInput bool, stagingDir string, logger log.Logger) error {
+func restoreDB(ctx context.Context, reader io.Reader, db config.DBConfig, snapshotHash []byte, psqlPath string, stagingDir string, logger log.Logger) error {
 	dump, err := stageSnapshotDump(ctx, stagingDir, reader, snapshotHash)
 	if err != nil {
 		return err
@@ -736,19 +735,7 @@ func restoreDB(ctx context.Context, reader io.Reader, db config.DBConfig, snapsh
 
 	copyErr := func() error {
 		defer stdinPipe.Close()
-		if restrictInput {
-			restrictKey := make([]byte, 32)
-			if _, err := rand.Read(restrictKey); err != nil {
-				return fmt.Errorf("failed to generate psql restriction key: %w", err)
-			}
-			// Restricted mode preserves COPY terminators while blocking every psql
-			// meta-command, including shell escapes and file includes.
-			if _, err := fmt.Fprintf(stdinPipe, "\\restrict %x\n", restrictKey); err != nil {
-				return fmt.Errorf("failed to restrict psql input: %w", err)
-			}
-		}
-		_, err := io.Copy(stdinPipe, dump)
-		return err
+		return writeRestrictedDump(stdinPipe, dump)
 	}()
 
 	waitErr := cmd.Wait()
@@ -762,6 +749,60 @@ func restoreDB(ctx context.Context, reader io.Reader, db config.DBConfig, snapsh
 
 	logger.Info("Database restoration completed successfully")
 	return nil
+}
+
+// writeRestrictedDump prefixes a random \restrict key. Restricted mode keeps
+// COPY terminators and blocks every other psql meta-command. pg_dump 16.15+
+// puts its own pair on the first line and a later \unrestrict line; that pair
+// is dropped so it is not nested inside the key generated here.
+func writeRestrictedDump(w io.Writer, r io.Reader) error {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return fmt.Errorf("failed to generate psql restriction key: %w", err)
+	}
+	if _, err := fmt.Fprintf(w, "\\restrict %x\n", key); err != nil {
+		return fmt.Errorf("failed to restrict psql input: %w", err)
+	}
+
+	br := bufio.NewReader(r)
+	line, err := br.ReadString('\n')
+	dropKey, dropOpen := pgDumpRestrictKey(line)
+	if !dropOpen && len(line) > 0 {
+		if _, werr := io.WriteString(w, line); werr != nil {
+			return werr
+		}
+	}
+	if err == io.EOF {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	for {
+		line, err = br.ReadString('\n')
+		if dropKey != "" && strings.TrimSpace(line) == `\unrestrict `+dropKey {
+			dropKey = ""
+		} else if len(line) > 0 {
+			if _, werr := io.WriteString(w, line); werr != nil {
+				return werr
+			}
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func pgDumpRestrictKey(line string) (string, bool) {
+	fields := strings.Fields(line)
+	if len(fields) == 2 && fields[0] == `\restrict` {
+		return fields[1], true
+	}
+	return "", false
 }
 
 // decompressAndValidateSnapshotHash hashes reader and writes it to output.
