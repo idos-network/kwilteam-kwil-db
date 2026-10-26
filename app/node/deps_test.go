@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/trufnetwork/kwil-db/config"
+	"github.com/trufnetwork/kwil-db/core/log"
 )
 
 func Test_getPGVersion(t *testing.T) {
@@ -87,4 +89,43 @@ func TestCheckVersionAtLeast(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVerifyDependenciesPsqlGate(t *testing.T) {
+	dir := t.TempDir()
+	pgDump := filepath.Join(dir, "pg_dump")
+	require.NoError(t, os.WriteFile(pgDump, []byte("#!/bin/sh\necho 'pg_dump (PostgreSQL) 16.15'\n"), 0o755))
+
+	psqlOnPath := func(t *testing.T, version string) {
+		t.Helper()
+		bin := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(bin, "psql"), []byte("#!/bin/sh\necho 'psql (PostgreSQL) "+version+"'\n"), 0o755))
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+
+	deps := func(migrations, stateSync bool, psqlPath string) *coreDependencies {
+		return &coreDependencies{
+			cfg: &config.Config{
+				PGDumpPath: pgDump,
+				Migrations: config.MigrationConfig{Enable: migrations},
+				StateSync:  config.StateSyncConfig{Enable: stateSync, PsqlPath: psqlPath},
+			},
+			logger: log.DiscardLogger,
+		}
+	}
+
+	t.Run("migrations reject psql 16.14", func(t *testing.T) {
+		psqlOnPath(t, "16.14")
+		require.Panics(t, func() { verifyDependencies(deps(true, false, "psql")) })
+	})
+
+	t.Run("migrations accept psql 16.15", func(t *testing.T) {
+		psqlOnPath(t, "16.15")
+		require.NotPanics(t, func() { verifyDependencies(deps(true, false, "psql")) })
+	})
+
+	t.Run("neither feature checks psql", func(t *testing.T) {
+		psqlOnPath(t, "16.14")
+		require.NotPanics(t, func() { verifyDependencies(deps(false, false, "psql")) })
+	})
 }
