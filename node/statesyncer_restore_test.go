@@ -78,6 +78,19 @@ func TestRestoreDBRestrictsMigrationDumpAndStripsPgDumpPair(t *testing.T) {
 	require.Equal(t, "SELECT 1;\n", parts[1])
 }
 
+func TestWriteRestrictedDumpStreamsLineLongerThanBuffer(t *testing.T) {
+	long := bytes.Repeat([]byte("a"), 8192) // bufio.Reader buffer is 4096
+	dump := append(append([]byte("\\restrict DumpKey\n"), long...), "\n\\unrestrict DumpKey\nSELECT 1;\n"...)
+	var out bytes.Buffer
+	require.NoError(t, writeRestrictedDump(&out, bytes.NewReader(dump)))
+
+	got := out.String()
+	nl := strings.IndexByte(got, '\n')
+	require.GreaterOrEqual(t, nl, 0)
+	require.Regexp(t, regexp.MustCompile(`^\\restrict [0-9a-f]{64}$`), got[:nl])
+	require.Equal(t, string(long)+"\nSELECT 1;\n", got[nl+1:])
+}
+
 func TestStateSyncRejectsSnapshotBeforeStartingPsql(t *testing.T) {
 	tempDir := t.TempDir()
 	var compressed bytes.Buffer

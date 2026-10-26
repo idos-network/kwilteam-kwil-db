@@ -764,32 +764,42 @@ func writeRestrictedDump(w io.Writer, r io.Reader) error {
 		return fmt.Errorf("failed to restrict psql input: %w", err)
 	}
 
+	// ReadSlice stops at the reader buffer (4KiB), so a newline-free COPY row
+	// cannot be buffered whole. A \restrict pair is only recognized when the
+	// entire line fits in that buffer; pg_dump's pair does.
 	br := bufio.NewReader(r)
-	line, err := br.ReadString('\n')
-	dropKey, dropOpen := pgDumpRestrictKey(line)
-	if !dropOpen && len(line) > 0 {
-		if _, werr := io.WriteString(w, line); werr != nil {
-			return werr
-		}
-	}
-	if err == io.EOF {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
+	var dropKey string
+	atLineStart := true
+	firstLine := true
 	for {
-		line, err = br.ReadString('\n')
-		if dropKey != "" && strings.TrimSpace(line) == `\unrestrict `+dropKey {
-			dropKey = ""
-		} else if len(line) > 0 {
-			if _, werr := io.WriteString(w, line); werr != nil {
+		chunk, err := br.ReadSlice('\n')
+		lineComplete := err == nil || err == io.EOF
+		drop := false
+		if atLineStart && lineComplete {
+			if firstLine {
+				var dropOpen bool
+				dropKey, dropOpen = pgDumpRestrictKey(string(chunk))
+				drop = dropOpen
+			} else if dropKey != "" && strings.TrimSpace(string(chunk)) == `\unrestrict `+dropKey {
+				dropKey = ""
+				drop = true
+			}
+		}
+		if !drop && len(chunk) > 0 {
+			if _, werr := w.Write(chunk); werr != nil {
 				return werr
 			}
 		}
+
+		atLineStart = lineComplete
+		if lineComplete {
+			firstLine = false
+		}
 		if err == io.EOF {
 			return nil
+		}
+		if err == bufio.ErrBufferFull {
+			continue
 		}
 		if err != nil {
 			return err
