@@ -44,6 +44,7 @@ type StatesyncConfig struct {
 	DBConfig     config.DBConfig
 	BlockSyncCfg *config.BlockSyncConfig
 	RcvdSnapsDir string
+	RootDir      string
 	P2PService   *P2PService
 
 	DB            DB
@@ -58,6 +59,7 @@ type StateSyncService struct {
 	dbConfig         config.DBConfig
 	blockSyncCfg     *config.BlockSyncConfig
 	snapshotDir      string
+	rootDir          string
 	trustedProviders []*peer.AddrInfo // trusted providers
 
 	// DHT
@@ -96,6 +98,7 @@ func NewStateSyncService(ctx context.Context, cfg *StatesyncConfig) (*StateSyncS
 		dbConfig:      cfg.DBConfig,
 		blockSyncCfg:  cfg.BlockSyncCfg,
 		snapshotDir:   cfg.RcvdSnapsDir,
+		rootDir:       cfg.RootDir,
 		db:            cfg.DB,
 		host:          cfg.P2PService.host,
 		discoverer:    cfg.P2PService.discovery,
