@@ -377,7 +377,11 @@ func isDbInitialized(ctx context.Context, d *coreDependencies) bool {
 	// A marker means psql was started and the restore was not accepted. Schema
 	// names can all exist while COPY is only partial, so wipe before any
 	// initialized check.
-	if node.RestoreIncomplete(d.rootDir) {
+	incomplete, err := node.RestoreIncomplete(d.rootDir)
+	if err != nil {
+		failBuild(err, "failed to check restore marker")
+	}
+	if incomplete {
 		if err := node.DropRestoreSchemas(ctx, db); err != nil {
 			failBuild(err, "failed to drop leftover restore schemas")
 		}

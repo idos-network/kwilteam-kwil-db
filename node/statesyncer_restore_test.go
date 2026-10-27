@@ -76,7 +76,9 @@ func TestRestoreDBRestrictsMigrationDumpAndStripsPgDumpPair(t *testing.T) {
 	parts = strings.SplitN(string(stdin), "\n", 2)
 	require.Regexp(t, regexp.MustCompile(`^\\restrict [0-9a-f]{64}$`), parts[0])
 	require.Equal(t, "SELECT 1;\n", parts[1])
-	require.False(t, RestoreIncomplete(tempDir), "accepted restore must clear the marker")
+	incomplete, err := RestoreIncomplete(tempDir)
+	require.NoError(t, err)
+	require.False(t, incomplete, "accepted restore must clear the marker")
 }
 
 func TestWriteRestrictedDumpStreamsLineLongerThanBuffer(t *testing.T) {

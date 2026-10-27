@@ -73,7 +73,9 @@ func TestRestoreDBHashMismatchDoesNotStartPsql(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid snapshot hash")
 	_, statErr := os.Stat(started)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
-	require.False(t, RestoreIncomplete(staging))
+	incomplete, err := RestoreIncomplete(staging)
+	require.NoError(t, err)
+	require.False(t, incomplete)
 }
 
 func TestRestoreDBImportFailureWaitsAndCleansUp(t *testing.T) {
@@ -104,7 +106,9 @@ exit 1
 		DBName: "kwild",
 	}, sum[:], staging, log.DiscardLogger)
 	require.Error(t, err)
-	require.True(t, RestoreIncomplete(staging), "failed import must stay marked so restart wipes it")
+	incomplete, err := RestoreIncomplete(staging)
+	require.NoError(t, err)
+	require.True(t, incomplete, "failed import must stay marked so restart wipes it")
 
 	logged, err := os.ReadFile(logPath)
 	require.NoError(t, err)
@@ -116,11 +120,22 @@ exit 1
 
 func TestRestoreIncompleteMarkerRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	require.False(t, RestoreIncomplete(dir))
+	incomplete, err := RestoreIncomplete(dir)
+	require.NoError(t, err)
+	require.False(t, incomplete)
 	require.NoError(t, markRestoreIncomplete(dir))
-	require.True(t, RestoreIncomplete(dir))
+	incomplete, err = RestoreIncomplete(dir)
+	require.NoError(t, err)
+	require.True(t, incomplete)
 	require.NoError(t, ClearRestoreIncomplete(dir))
-	require.False(t, RestoreIncomplete(dir))
+	incomplete, err = RestoreIncomplete(dir)
+	require.NoError(t, err)
+	require.False(t, incomplete)
+
+	file := filepath.Join(dir, "not-a-dir")
+	require.NoError(t, os.WriteFile(file, []byte("x"), 0o644))
+	_, err = RestoreIncomplete(file)
+	require.Error(t, err)
 }
 
 func TestDropRestoreSchemasSQLDropsUserNamespaces(t *testing.T) {

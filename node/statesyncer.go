@@ -921,13 +921,20 @@ func restoreIncompletePath(dir string) string {
 
 // RestoreIncomplete reports whether a snapshot restore was started and not yet
 // accepted. The marker lives in the node root, outside the snapshot directory
-// that startup deletes.
-func RestoreIncomplete(dir string) bool {
+// that startup deletes. Only a missing marker is "not incomplete"; other stat
+// errors are returned so startup does not treat an unreadable marker as done.
+func RestoreIncomplete(dir string) (bool, error) {
 	if dir == "" {
-		return false
+		return false, nil
 	}
 	_, err := os.Stat(restoreIncompletePath(dir))
-	return err == nil
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 func markRestoreIncomplete(dir string) error {
