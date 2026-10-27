@@ -209,14 +209,17 @@ func (e *executionContext) getVariableType(name string) (*types.DataType, error)
 // It will parse the SQL, create a logical plan, and execute the query.
 // Now supports nested queries using PostgreSQL savepoints and row buffering.
 func (e *executionContext) query(sql string, fn func(*row) error) error {
-	return e.queryInternal(sql, fn, false)
+	return e.queryInternal(sql, fn, false, false)
 }
 
-func (e *executionContext) queryWithSelectPrivilegeChecks(sql string, fn func(*row) error) error {
-	return e.queryInternal(sql, fn, true)
+// exemptStatementNamespace is set for DML. The target table is in the statement
+// namespace, which the INSERT/UPDATE/DELETE check already authorized. Sources
+// in any other namespace still need SELECT.
+func (e *executionContext) queryWithSelectPrivilegeChecks(sql string, fn func(*row) error, exemptStatementNamespace bool) error {
+	return e.queryInternal(sql, fn, true, exemptStatementNamespace)
 }
 
-func (e *executionContext) queryInternal(sql string, fn func(*row) error, checkReferencedSelects bool) error {
+func (e *executionContext) queryInternal(sql string, fn func(*row) error, checkReferencedSelects bool, exemptStatementNamespace bool) error {
 	done := observeSQL(e, sql)
 	defer done()
 
@@ -237,7 +240,7 @@ func (e *executionContext) queryInternal(sql string, fn func(*row) error, checkR
 		return err
 	}
 	if checkReferencedSelects {
-		if err := e.checkReferencedSelectPrivileges(analyzed); err != nil {
+		if err := e.checkReferencedSelectPrivileges(analyzed, exemptStatementNamespace); err != nil {
 			return err
 		}
 	}
@@ -313,8 +316,11 @@ func (e *executionContext) queryInternal(sql string, fn func(*row) error, checkR
 	return nil
 }
 
-func (e *executionContext) checkReferencedSelectPrivileges(plan *logical.AnalyzedPlan) error {
+func (e *executionContext) checkReferencedSelectPrivileges(plan *logical.AnalyzedPlan, exemptStatementNamespace bool) error {
 	for _, namespace := range referencedPhysicalTableNamespaces(plan) {
+		if exemptStatementNamespace && namespace == e.scope.namespace {
+			continue
+		}
 		if err := e.checkPrivilegeOnNamespace(_SELECT_PRIVILEGE, namespace); err != nil {
 			return err
 		}

@@ -1640,11 +1640,9 @@ func (i *interpreterPlanner) VisitSQLStatement(p0 *parse.SQLStatement) any {
 			return fmt.Errorf("%w: SQL statement mutates state, but the execution context is read-only: %s", engine.ErrCannotMutateState, raw)
 		}
 
-		if privilege == _SELECT_PRIVILEGE {
-			return exec.queryWithSelectPrivilegeChecks(raw, fn)
-		}
-
-		return exec.query(raw, fn)
+		// SELECT checks every referenced namespace. DML already authorized the
+		// statement namespace, so only sources in other namespaces need SELECT.
+		return exec.queryWithSelectPrivilegeChecks(raw, fn, privilege != _SELECT_PRIVILEGE)
 	})
 }
 

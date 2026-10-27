@@ -898,6 +898,7 @@ func Test_SelectPrivilegeChecksReferencedNamespaces(t *testing.T) {
 		"exists subquery":   `{info}SELECT EXISTS(SELECT 1 FROM main.users);`,
 		"in subquery":       `{info}SELECT name FROM tables WHERE name IN (SELECT name FROM main.users);`,
 		"cte":               `{info}WITH u AS (SELECT name FROM main.users) SELECT * FROM u;`,
+		"table function":    `{info}SELECT t.name FROM unnest((SELECT ARRAY[name] FROM main.users LIMIT 1)) AS t(name);`,
 	}
 	for name, query := range deniedQueries {
 		t.Run(name, func(t *testing.T) {
@@ -928,6 +929,48 @@ func Test_SelectPrivilegeChecksReferencedNamespaces(t *testing.T) {
 	require.NoError(t, err)
 
 	err = interp.Execute(newEngineCtx("main_reader"), tx, `{info}SELECT name FROM main.users;`, nil, exact("Alice"))
+	require.NoError(t, err)
+	values = nil
+	err = interp.Execute(newEngineCtx("main_reader"), tx, `{info}SELECT t.name FROM unnest((SELECT ARRAY[name] FROM main.users LIMIT 1)) AS t(name);`, nil, func(row *common.Row) error {
+		values = append(values, row.Values)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, [][]any{{"Alice"}}, values)
+
+	// writer can mutate dropbox, and still has no SELECT on main. Same-namespace
+	// writes stay allowed; a source read of main does not.
+	for _, stmt := range []string{
+		`CREATE NAMESPACE dropbox;`,
+		`{dropbox}CREATE TABLE leak (name TEXT PRIMARY KEY);`,
+		`REVOKE SELECT ON dropbox FROM default;`,
+		`CREATE ROLE writer;`,
+		`GRANT INSERT, UPDATE, DELETE ON dropbox TO writer;`,
+		`GRANT writer TO 'writer';`,
+	} {
+		err = interp.Execute(newEngineCtx(defaultCaller), tx, stmt, nil, nil)
+		require.NoError(t, err)
+	}
+
+	deniedDML := map[string]string{
+		"insert select": `{dropbox}INSERT INTO leak (name) SELECT name FROM main.users;`,
+		"update source": `{dropbox}UPDATE leak SET name = (SELECT name FROM main.users LIMIT 1);`,
+		"update from":   `{dropbox}UPDATE leak SET name = u.name FROM main.users AS u WHERE leak.name = u.name;`,
+		"delete source": `{dropbox}DELETE FROM leak WHERE name IN (SELECT name FROM main.users);`,
+	}
+	for name, query := range deniedDML {
+		t.Run(name, func(t *testing.T) {
+			queryErr := interp.Execute(newEngineCtx("writer"), tx, query, nil, nil)
+			require.ErrorIs(t, queryErr, engine.ErrDoesNotHavePrivilege)
+			require.Contains(t, queryErr.Error(), `SELECT on namespace "main"`)
+		})
+	}
+
+	err = interp.Execute(newEngineCtx("writer"), tx, `{dropbox}INSERT INTO leak (name) VALUES ('ok');`, nil, nil)
+	require.NoError(t, err)
+	err = interp.Execute(newEngineCtx("writer"), tx, `{dropbox}UPDATE leak SET name = 'x';`, nil, nil)
+	require.NoError(t, err)
+	err = interp.Execute(newEngineCtx("writer"), tx, `{dropbox}DELETE FROM leak WHERE name = 'x';`, nil, nil)
 	require.NoError(t, err)
 }
 

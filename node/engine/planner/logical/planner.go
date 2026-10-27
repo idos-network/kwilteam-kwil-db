@@ -2921,10 +2921,12 @@ func (s *scopeContext) tableFunction(node *parse.RelationTableFunction) (*Scan, 
 		return nil, nil, fmt.Errorf("table-valued function %s must have an explicit alias", node.FunctionCall.Name)
 	}
 
-	// Validate function arguments and get table schema
+	// Plan arguments once and keep them. Discarding the expression drops
+	// subquery scans, so a later privilege walk cannot see them.
+	args := make([]Expression, len(node.FunctionCall.Args))
 	argTypes := make([]*types.DataType, len(node.FunctionCall.Args))
 	for i, arg := range node.FunctionCall.Args {
-		_, field, err := s.expr(arg, s.OuterRelation, nil)
+		expr, field, err := s.expr(arg, s.OuterRelation, nil)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error evaluating argument %d: %w", i+1, err)
 		}
@@ -2932,6 +2934,7 @@ func (s *scopeContext) tableFunction(node *parse.RelationTableFunction) (*Scan, 
 		if err != nil {
 			return nil, nil, fmt.Errorf("argument %d is not scalar: %w", i+1, err)
 		}
+		args[i] = expr
 		argTypes[i] = dataType
 	}
 
@@ -2974,6 +2977,7 @@ func (s *scopeContext) tableFunction(node *parse.RelationTableFunction) (*Scan, 
 	// Create table function scan source
 	scanSource := &TableFunctionScanSource{
 		FunctionCall: node.FunctionCall,
+		Args:         args,
 		rel:          rel,
 	}
 

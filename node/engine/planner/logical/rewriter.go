@@ -89,7 +89,9 @@ func (r *rewriteVisitor) VisitTableScanSource(p0 *TableScanSource) any {
 }
 
 func (r *rewriteVisitor) VisitTableFunctionScanSource(p0 *TableFunctionScanSource) any {
-	return r.scanSource(p0, func() {})
+	return r.scanSource(p0, func() {
+		r.slice(p0.Args)
+	})
 }
 
 func (r *rewriteVisitor) VisitRelationTableFunction(p0 *parse.RelationTableFunction) any {
