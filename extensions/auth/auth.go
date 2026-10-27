@@ -24,6 +24,11 @@ var (
 	ErrAuthenticatorExists = errors.New("authenticator already exists")
 	// ErrAuthenticatorNotFound is returned when an authenticator is not found
 	ErrAuthenticatorNotFound = errors.New("authenticator not found")
+	// ErrNonCanonicalAuthType is returned when a signature type matches a
+	// registered authenticator only after case-folding. Consensus transactions
+	// must use the registered name: Signature.Type is outside the signed body,
+	// so a case variant is a second hash and a different @authenticator.
+	ErrNonCanonicalAuthType = errors.New("authenticator type is not the registered name")
 )
 
 // registeredAuthenticators is the Authenticator registry used by kwild.
@@ -110,6 +115,27 @@ func init() {
 func IsAuthTypeValid(authType string) bool {
 	_, ok := registeredAuthenticators[authType] // case sensistive to avoid tx maleability
 	return ok
+}
+
+// RegisteredAuthType returns the registry key for name.
+// Lookup is case-insensitive. The key is the string @authenticator must use.
+func RegisteredAuthType(name string) (string, error) {
+	key := strings.ToLower(name)
+	if _, ok := registeredAuthenticators[key]; !ok {
+		return "", fmt.Errorf("%w: %s", ErrAuthenticatorNotFound, name)
+	}
+	return key, nil
+}
+
+// ValidateCanonicalAuthType accepts only the exact registered name.
+func ValidateCanonicalAuthType(authType string) error {
+	if IsAuthTypeValid(authType) {
+		return nil
+	}
+	if _, err := RegisteredAuthType(authType); err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: %q", ErrNonCanonicalAuthType, authType)
 }
 
 func GetIdentifierFromSigner(signer auth.Signer) (string, error) {

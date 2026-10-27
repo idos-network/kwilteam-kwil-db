@@ -906,6 +906,16 @@ func (r *rowReader) read(row *common.Row) error {
 // txCtx creates a transaction context from the given context and call message.
 // It will do its best to determine the caller and signer, and the block context.
 func (svc *Service) txCtx(ctx context.Context, sender []byte, authtype string) (*common.TxContext, *jsonrpc.Error) {
+	// View calls keep case-insensitive verify. @authenticator is the
+	// registered name, so a literal 'mm_token' guard cannot be skipped.
+	if authtype != "" {
+		registered, err := authExt.RegisteredAuthType(authtype)
+		if err != nil {
+			return nil, jsonrpc.NewError(jsonrpc.ErrorIdentInvalid, "failed to get caller: "+err.Error(), nil)
+		}
+		authtype = registered
+	}
+
 	signer := sender
 	caller := "" // string representation of sender, if signed.  Otherwise, empty string
 	if len(signer) > 0 && authtype != "" {
