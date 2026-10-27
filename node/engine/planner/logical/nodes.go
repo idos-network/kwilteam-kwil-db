@@ -3346,7 +3346,10 @@ func innerFormat(plan LogicalNode, count int, printLong []bool) (string, []*Subp
 // TableFunctionScanSource represents a scan of a table-valued function like UNNEST.
 type TableFunctionScanSource struct {
 	FunctionCall *parse.ExpressionFunctionCall
-	rel          *Relation
+	// Args are the planned arguments. SQL generation still uses FunctionCall;
+	// Args keep subqueries in the plan so privilege checks can see them.
+	Args []Expression
+	rel  *Relation
 }
 
 func (t *TableFunctionScanSource) Accept(v Visitor) any {
@@ -3354,7 +3357,14 @@ func (t *TableFunctionScanSource) Accept(v Visitor) any {
 }
 
 func (t *TableFunctionScanSource) Children() []Traversable {
-	return nil
+	if len(t.Args) == 0 {
+		return nil
+	}
+	children := make([]Traversable, len(t.Args))
+	for i, arg := range t.Args {
+		children[i] = arg
+	}
+	return children
 }
 
 func (t *TableFunctionScanSource) FormatScan() string {
@@ -3370,7 +3380,11 @@ func (t *TableFunctionScanSource) Relation() *Relation {
 }
 
 func (t *TableFunctionScanSource) Plans() []Plan {
-	return nil
+	var plans []Plan
+	for _, arg := range t.Args {
+		plans = append(plans, arg.Plans()...)
+	}
+	return plans
 }
 
 func (t *TableFunctionScanSource) Equal(other Traversable) bool {
@@ -3382,9 +3396,13 @@ func (t *TableFunctionScanSource) Equal(other Traversable) bool {
 	if t.FunctionCall.Name != o.FunctionCall.Name {
 		return false
 	}
-	if len(t.FunctionCall.Args) != len(o.FunctionCall.Args) {
+	if len(t.FunctionCall.Args) != len(o.FunctionCall.Args) || len(t.Args) != len(o.Args) {
 		return false
 	}
-	// Could do deeper comparison of arguments if needed
+	for i, arg := range t.Args {
+		if !eq(arg, o.Args[i]) {
+			return false
+		}
+	}
 	return true
 }

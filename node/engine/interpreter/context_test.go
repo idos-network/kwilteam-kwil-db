@@ -230,6 +230,21 @@ func TestReferencedPhysicalTableNamespacesIncludesSubqueries(t *testing.T) {
 	}
 
 	require.Equal(t, []string{"cte_namespace", "main", "private"}, referencedPhysicalTableNamespaces(plan))
+
+	// A subquery argument of a table function is not a child of the scan unless
+	// the planned argument expression is retained.
+	fnPlan := &logical.AnalyzedPlan{
+		Plan: &logical.Scan{
+			Source: &logical.TableFunctionScanSource{
+				Args: []logical.Expression{
+					&logical.SubqueryExpr{
+						Query: &logical.Subquery{Plan: &logical.Subplan{Plan: physicalScan("hidden")}},
+					},
+				},
+			},
+		},
+	}
+	require.Equal(t, []string{"hidden"}, referencedPhysicalTableNamespaces(fnPlan))
 }
 
 // 5) Non-concrete proposer type: wrapped secp256k1 with EthPersonalSignAuth
