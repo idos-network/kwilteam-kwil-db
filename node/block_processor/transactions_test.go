@@ -925,6 +925,11 @@ func TestMissingSignatureRejected(t *testing.T) {
 	err = verifyTransactionWithContext(authExtVerifyCtx(), &types.Transaction{})
 	require.EqualError(t, err, "transaction signature is required")
 
+	err = verifyTransactionWithContext(authExtVerifyCtx(), &types.Transaction{
+		Signature: &auth.Signature{Type: "ED25519"},
+	})
+	require.ErrorIs(t, err, authExt.ErrNonCanonicalAuthType)
+
 	chainCtx := &common.ChainContext{
 		ChainID: "test",
 		NetworkParameters: &types.NetworkParameters{

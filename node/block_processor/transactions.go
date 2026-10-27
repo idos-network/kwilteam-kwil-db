@@ -465,6 +465,9 @@ func verifyTransactionWithContext(verifyCtx authExt.VerifyContext, tx *types.Tra
 	if tx == nil || tx.Signature == nil {
 		return errors.New("transaction signature is required")
 	}
+	if err := authExt.ValidateCanonicalAuthType(tx.Signature.Type); err != nil {
+		return err
+	}
 
 	msg, err := tx.SerializeMsg()
 	if err != nil {

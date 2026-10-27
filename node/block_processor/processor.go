@@ -263,6 +263,11 @@ func (bp *BlockProcessor) checkTx(ctx context.Context, readTx sql.Tx, ntx *types
 	if tx.Signature == nil {
 		return errors.New("transaction signature is required")
 	}
+	// Recheck skips signature verification. The type check still has to run,
+	// or a case-variant admitted earlier keeps its raw @authenticator.
+	if err := authExt.ValidateCanonicalAuthType(tx.Signature.Type); err != nil {
+		return fmt.Errorf("failed to verify the transaction: %w", err)
+	}
 
 	bp.log.Debug("Check transaction", "Recheck", recheck, "Hash", txHash, "Sender", log.LazyHex(tx.Sender),
 		"PayloadType", tx.Body.PayloadType, "Nonce", tx.Body.Nonce, "TxFee", tx.Body.Fee)
@@ -437,6 +442,12 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 	for i, tx := range req.Block.Txns {
 		if tx == nil || tx.Signature == nil {
 			return nil, errors.New("transaction signature is required")
+		}
+		// Non-context authenticators are not re-verified here. Reject a
+		// non-canonical type anyway so @authenticator cannot diverge from
+		// the registered name.
+		if err := authExt.ValidateCanonicalAuthType(tx.Signature.Type); err != nil {
+			return nil, fmt.Errorf("failed to verify block tx: %w", err)
 		}
 
 		requiresContext, err := authExt.RequiresContext(tx.Signature.Type)
