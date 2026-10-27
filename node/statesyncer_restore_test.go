@@ -29,7 +29,7 @@ func TestRestoreDBRestrictsPsqlMetaCommands(t *testing.T) {
 	hash := sha256.Sum256(dump)
 	err := restoreDB(context.Background(), bytes.NewReader(dump), config.DBConfig{
 		Host: "localhost", Port: "5432", User: "kwild", DBName: "kwild",
-	}, hash[:], psqlPath, tempDir, log.DiscardLogger)
+	}, hash[:], psqlPath, tempDir, tempDir, log.DiscardLogger)
 	require.NoError(t, err)
 
 	stdin, err := os.ReadFile(stdinFile)
@@ -76,6 +76,7 @@ func TestRestoreDBRestrictsMigrationDumpAndStripsPgDumpPair(t *testing.T) {
 	parts = strings.SplitN(string(stdin), "\n", 2)
 	require.Regexp(t, regexp.MustCompile(`^\\restrict [0-9a-f]{64}$`), parts[0])
 	require.Equal(t, "SELECT 1;\n", parts[1])
+	require.False(t, RestoreIncomplete(tempDir), "accepted restore must clear the marker")
 }
 
 func TestWriteRestrictedDumpStreamsLineLongerThanBuffer(t *testing.T) {

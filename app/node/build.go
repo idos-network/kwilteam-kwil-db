@@ -235,6 +235,7 @@ func initializeStatesyncService(ctx context.Context, d *coreDependencies, p2p *n
 	rcvdSnapsDir := config.ReceivedSnapshotsDir(d.rootDir)
 	ssCfg := &node.StatesyncConfig{
 		RcvdSnapsDir:  rcvdSnapsDir,
+		RootDir:       d.rootDir,
 		StateSyncCfg:  &d.cfg.StateSync,
 		DBConfig:      d.cfg.DB,
 		BlockSyncCfg:  &d.cfg.BlockSync,
@@ -361,8 +362,8 @@ func restoreDB(d *coreDependencies, ctx context.Context, ss *node.StateSyncServi
 }
 
 // requiredInitSchemas must all exist before a DB is treated as initialized.
-// kwild_voting alone is created early in a snapshot dump, so a failed restore
-// can leave it behind and skip statesync/genesis recovery on the next start.
+// An in-progress restore marker overrides this: psql creates these schemas
+// before COPY finishes. A partial set without the marker is still wiped.
 var requiredInitSchemas = []string{"kwild_voting", "kwild_internal", "kwild_accts"}
 
 // isDbInitialized checks if the database is already initialized.
@@ -372,6 +373,19 @@ func isDbInitialized(ctx context.Context, d *coreDependencies) bool {
 		failBuild(err, "kwild database open failed")
 	}
 	defer db.Close()
+
+	// A marker means psql was started and the restore was not accepted. Schema
+	// names can all exist while COPY is only partial, so wipe before any
+	// initialized check.
+	if node.RestoreIncomplete(d.rootDir) {
+		if err := node.DropRestoreSchemas(ctx, db); err != nil {
+			failBuild(err, "failed to drop leftover restore schemas")
+		}
+		if err := node.ClearRestoreIncomplete(d.rootDir); err != nil {
+			failBuild(err, "failed to clear restore marker")
+		}
+		return false
+	}
 
 	complete, leftover, err := inspectInitSchemas(ctx, db)
 	if err != nil {

@@ -62,16 +62,18 @@ func TestRestoreDBHashMismatchDoesNotStartPsql(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	dump := []byte("CREATE SCHEMA kwild_voting;\n")
+	staging := t.TempDir()
 	err := RestoreDB(context.Background(), bytes.NewReader(dump), config.DBConfig{
 		Host:   "127.0.0.1",
 		Port:   "5432",
 		User:   "kwild",
 		DBName: "kwild",
-	}, []byte("bad-hash-bytes-not-32-but-checked"), t.TempDir(), log.DiscardLogger)
+	}, []byte("bad-hash-bytes-not-32-but-checked"), staging, log.DiscardLogger)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid snapshot hash")
 	_, statErr := os.Stat(started)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
+	require.False(t, RestoreIncomplete(staging))
 }
 
 func TestRestoreDBImportFailureWaitsAndCleansUp(t *testing.T) {
@@ -94,13 +96,15 @@ exit 1
 
 	dump := []byte("CREATE SCHEMA kwild_voting;\n")
 	sum := sha256.Sum256(dump)
+	staging := t.TempDir()
 	err := RestoreDB(context.Background(), bytes.NewReader(dump), config.DBConfig{
 		Host:   "127.0.0.1",
 		Port:   "5432",
 		User:   "kwild",
 		DBName: "kwild",
-	}, sum[:], t.TempDir(), log.DiscardLogger)
+	}, sum[:], staging, log.DiscardLogger)
 	require.Error(t, err)
+	require.True(t, RestoreIncomplete(staging), "failed import must stay marked so restart wipes it")
 
 	logged, err := os.ReadFile(logPath)
 	require.NoError(t, err)
@@ -108,6 +112,22 @@ exit 1
 	require.Contains(t, out, "WAITED")
 	require.Contains(t, out, "CLEANUP")
 	require.Less(t, strings.Index(out, "WAITED"), strings.Index(out, "CLEANUP"), "cleanup must run after cmd.Wait")
+}
+
+func TestRestoreIncompleteMarkerRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	require.False(t, RestoreIncomplete(dir))
+	require.NoError(t, markRestoreIncomplete(dir))
+	require.True(t, RestoreIncomplete(dir))
+	require.NoError(t, ClearRestoreIncomplete(dir))
+	require.False(t, RestoreIncomplete(dir))
+}
+
+func TestDropRestoreSchemasSQLDropsUserNamespaces(t *testing.T) {
+	require.Contains(t, dropRestoreSchemasSQL, "nspname <> 'public'")
+	require.Contains(t, dropRestoreSchemasSQL, "information_schema")
+	require.Contains(t, dropRestoreSchemasSQL, `NOT LIKE 'pg\_%'`)
+	require.NotContains(t, dropRestoreSchemasSQL, "kwild\\_%")
 }
 
 func TestDropRestoreSchemasAfterFailure(t *testing.T) {

@@ -103,9 +103,14 @@ func (s *StateSyncService) DiscoverSnapshots(ctx context.Context) (int64, error)
 					if cleanErr := dropRestoreSchemasAfterFailure(s.cfg.PsqlPath, s.dbConfig); cleanErr != nil {
 						return -1, errors.Join(err, cleanErr)
 					}
+					// Marker stays set so the next start wipes any residue the
+					// cleanup missed and does not treat this DB as initialized.
 					return -1, err
 				}
 
+				if err := ClearRestoreIncomplete(s.rootDir); err != nil {
+					return -1, err
+				}
 				return int64(snap.Height), nil
 			}
 			retry++
@@ -697,20 +702,23 @@ func (s *StateSyncService) restoreDB(ctx context.Context, snapshot *snapshotMeta
 	}
 	defer reader.Close()
 
-	return restoreDB(ctx, reader, s.dbConfig, snapshot.Hash, s.cfg.PsqlPath, s.snapshotDir, s.log)
+	return restoreDB(ctx, reader, s.dbConfig, snapshot.Hash, s.cfg.PsqlPath, s.snapshotDir, s.rootDir, s.log)
 }
 
 // RestoreDB restores a genesis or migration dump. Migration dumps are snapshot
 // bytes from migrate_from, so they are restricted the same way as state sync.
 //
-// The dump hash is verified before psql starts. On import failure it waits for
-// psql and drops leftover kwild_/ds_* schemas so a partial restore cannot be
-// treated as initialized state on restart.
+// The dump hash is verified before psql starts. A marker is written in
+// stagingDir before psql and removed only after psql accepts the dump. State
+// sync clears its marker only after the restored app hash is verified.
 func RestoreDB(ctx context.Context, reader io.Reader, db config.DBConfig, snapshotHash []byte, stagingDir string, logger log.Logger) error {
-	return restoreDB(ctx, reader, db, snapshotHash, "psql", stagingDir, logger)
+	if err := restoreDB(ctx, reader, db, snapshotHash, "psql", stagingDir, stagingDir, logger); err != nil {
+		return err
+	}
+	return ClearRestoreIncomplete(stagingDir)
 }
 
-func restoreDB(ctx context.Context, reader io.Reader, db config.DBConfig, snapshotHash []byte, psqlPath string, stagingDir string, logger log.Logger) error {
+func restoreDB(ctx context.Context, reader io.Reader, db config.DBConfig, snapshotHash []byte, psqlPath string, stagingDir string, markerDir string, logger log.Logger) error {
 	dump, err := stageSnapshotDump(ctx, stagingDir, reader, snapshotHash)
 	if err != nil {
 		return err
@@ -719,6 +727,11 @@ func restoreDB(ctx context.Context, reader io.Reader, db config.DBConfig, snapsh
 		dump.Close()
 		os.Remove(dump.Name())
 	}()
+
+	// Written before psql so a kill mid-import is still visible on the next start.
+	if err := markRestoreIncomplete(markerDir); err != nil {
+		return err
+	}
 
 	cmd := psqlCommand(ctx, psqlPath, db, "--set", "ON_ERROR_STOP=1")
 	stdinPipe, err := cmd.StdinPipe()
@@ -881,6 +894,9 @@ func stageSnapshotDump(ctx context.Context, stagingDir string, reader io.Reader,
 	return dump, nil
 }
 
+// dropRestoreSchemasSQL drops every schema a snapshot can create, including
+// main, info, and user namespaces. Those names are not kwild_* or ds_*.
+// public stays: uuid-ossp and pgcrypto are installed there.
 const dropRestoreSchemasSQL = `
 DO $$
 DECLARE
@@ -888,13 +904,70 @@ DECLARE
 BEGIN
   FOR r IN
     SELECT nspname FROM pg_namespace
-    WHERE nspname LIKE 'kwild\_%' ESCAPE '\'
-       OR nspname LIKE 'ds\_%' ESCAPE '\'
+    WHERE nspname <> 'information_schema'
+      AND nspname <> 'public'
+      AND nspname NOT LIKE 'pg\_%' ESCAPE '\'
   LOOP
     EXECUTE format('DROP SCHEMA IF EXISTS %I CASCADE', r.nspname);
   END LOOP;
 END
 $$;`
+
+const restoreIncompleteFile = "restore-incomplete"
+
+func restoreIncompletePath(dir string) string {
+	return filepath.Join(dir, restoreIncompleteFile)
+}
+
+// RestoreIncomplete reports whether a snapshot restore was started and not yet
+// accepted. The marker lives in the node root, outside the snapshot directory
+// that startup deletes.
+func RestoreIncomplete(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	_, err := os.Stat(restoreIncompletePath(dir))
+	return err == nil
+}
+
+func markRestoreIncomplete(dir string) error {
+	if dir == "" {
+		return fmt.Errorf("missing restore marker directory")
+	}
+	f, err := os.OpenFile(restoreIncompletePath(dir), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return syncDir(dir)
+}
+
+// ClearRestoreIncomplete removes the in-progress marker. Call it only after
+// the restore is accepted, or after leftover schemas have been dropped.
+func ClearRestoreIncomplete(dir string) error {
+	if dir == "" {
+		return fmt.Errorf("missing restore marker directory")
+	}
+	if err := os.Remove(restoreIncompletePath(dir)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return syncDir(dir)
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
 
 func psqlCommand(ctx context.Context, psqlPath string, db config.DBConfig, extraArgs ...string) *exec.Cmd {
 	args := []string{
@@ -930,8 +1003,8 @@ func dropRestoreSchemasWithPsql(ctx context.Context, psqlPath string, db config.
 	return nil
 }
 
-// DropRestoreSchemas removes leftover kwild_/ds_* schemas from a failed restore
-// so a subsequent statesync or genesis recovery can run against an empty DB.
+// DropRestoreSchemas removes schemas left by a failed restore, including user
+// namespaces, so a later statesync or genesis recovery can import again.
 func DropRestoreSchemas(ctx context.Context, exec sql.Executor) error {
 	_, err := exec.Execute(ctx, dropRestoreSchemasSQL)
 	return err
