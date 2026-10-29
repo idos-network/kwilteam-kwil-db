@@ -96,6 +96,41 @@ func (ce *ConsensusEngine) validateBlock(blk *ktypes.Block) error {
 	return nil
 }
 
+// maxProposalClockDrift is how far ahead of the local clock a block proposal's
+// timestamp may be. Resolution expiry and new expirations follow the block
+// timestamp, so an unbounded leader clock could expire pending resolutions.
+const maxProposalClockDrift = time.Minute
+
+// validateProposalTimestamp checks a live block proposal's timestamp: it must
+// be after the previous block's (when known) and no more than
+// maxProposalClockDrift ahead of now. It depends on the local clock, so it is
+// only for voting on proposals, never for committed blocks during sync or
+// replay, which validateBlock also serves.
+func validateProposalTimestamp(stamp, prevStamp, now time.Time) error {
+	if !prevStamp.IsZero() && !stamp.After(prevStamp) {
+		return fmt.Errorf("block timestamp %s is not after the previous block timestamp %s",
+			stamp.Format(time.RFC3339Nano), prevStamp.Format(time.RFC3339Nano))
+	}
+
+	if limit := now.Add(maxProposalClockDrift); stamp.After(limit) {
+		return fmt.Errorf("block timestamp %s is more than %s ahead of local time %s",
+			stamp.Format(time.RFC3339Nano), maxProposalClockDrift, now.Format(time.RFC3339Nano))
+	}
+
+	return nil
+}
+
+// proposalTimestamp is the timestamp for a new block proposal: the current
+// time, or 1ms after the previous block if the local clock is not past it.
+// Headers carry milliseconds, so 1ms is the smallest increment.
+func proposalTimestamp(now, prevStamp time.Time) time.Time {
+	stamp := now.Truncate(time.Millisecond).UTC()
+	if !prevStamp.IsZero() && !stamp.After(prevStamp) {
+		stamp = prevStamp.Add(time.Millisecond).UTC()
+	}
+	return stamp
+}
+
 // lastBlock returns the height, hash, and timestamp of the last committed
 // block. This is safe for concurrent access, and access from external callers
 // such via QueueTx.
