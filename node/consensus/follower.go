@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	ktypes "github.com/trufnetwork/kwil-db/core/types"
 	"github.com/trufnetwork/kwil-db/node/types"
@@ -191,6 +192,15 @@ func (ce *ConsensusEngine) processBlockProposal(ctx context.Context, blkPropMsg 
 		return nil
 	}
 
+	// Skip before the replacement below can roll back an active proposal. No
+	// vote: a Nack here would let clock skew halt the leader. The proposal is
+	// not stored, so its rebroadcast is checked again.
+	if err := checkProposalNotAhead(blkPropMsg.blk.Header.Timestamp, time.Now()); err != nil {
+		ce.log.Warn("Skipping block proposal from the future, waiting for rebroadcast",
+			"height", blkPropMsg.height, "blockID", blkPropMsg.blkHash, "error", err)
+		return nil
+	}
+
 	if ce.state.blkProp != nil {
 		if ce.state.blkProp.blkHash == blkPropMsg.blkHash {
 			ce.log.Info("Already processing the block proposal", "height", blkPropMsg.height)
@@ -223,7 +233,12 @@ func (ce *ConsensusEngine) processBlockProposal(ctx context.Context, blkPropMsg 
 
 	ce.log.Debug("Processing block proposal", "height", blkPropMsg.blk.Header.Height, "blkID", blkPropMsg.blkHash, "numTxs", blkPropMsg.blk.Header.NumTxns)
 
-	if err := ce.validateBlock(blkPropMsg.blk); err != nil {
+	_, prevStamp := ce.lastBlockInternal()
+	validationErr := ce.validateBlock(blkPropMsg.blk)
+	if validationErr == nil {
+		validationErr = validateProposalTimestamp(blkPropMsg.blk.Header.Timestamp, prevStamp)
+	}
+	if validationErr != nil {
 		sig, err := ktypes.SignVote(blkPropMsg.blkHash, false, nil, ce.privKey)
 		if err != nil {
 			return fmt.Errorf("error signing the voteInfo: %w", err)
@@ -238,7 +253,7 @@ func (ce *ConsensusEngine) processBlockProposal(ctx context.Context, blkPropMsg 
 			Signature:  sig,
 		})
 
-		return fmt.Errorf("error validating block: %w", err)
+		return fmt.Errorf("error validating block: %w", validationErr)
 	}
 	ce.state.blkProp = blkPropMsg
 	ce.state.blockRes = nil

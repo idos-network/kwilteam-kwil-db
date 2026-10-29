@@ -238,7 +238,8 @@ func (ce *ConsensusEngine) createBlockProposal(ctx context.Context) (*blockPropo
 
 	valSetHash := ce.validatorSetHash()
 	paramsHash := ce.blockProcessor.ConsensusParams().Hash()
-	stamp := time.Now().Truncate(time.Millisecond).UTC()
+	_, prevStamp := ce.lastBlockInternal()
+	stamp := proposalTimestamp(time.Now(), prevStamp)
 	blk := ktypes.NewBlock(ce.state.lc.height+1, ce.state.lc.blkHash, ce.state.lc.appHash, valSetHash, paramsHash, stamp, finalTxs)
 
 	// add the leader updates to the block header if any
