@@ -229,6 +229,13 @@ func (ce *ConsensusEngine) processBlockProposal(ctx context.Context, blkPropMsg 
 	if validationErr == nil {
 		validationErr = validateProposalTimestamp(blkPropMsg.blk.Header.Timestamp, prevStamp, time.Now())
 	}
+	if errors.Is(validationErr, errProposalAhead) {
+		// No vote: a Nack here would let clock skew halt the leader. The
+		// proposal is not stored, so its rebroadcast is checked again.
+		ce.log.Warn("Skipping block proposal from the future, waiting for rebroadcast",
+			"height", blkPropMsg.height, "blockID", blkPropMsg.blkHash, "error", validationErr)
+		return nil
+	}
 	if validationErr != nil {
 		sig, err := ktypes.SignVote(blkPropMsg.blkHash, false, nil, ce.privKey)
 		if err != nil {
