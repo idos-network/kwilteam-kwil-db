@@ -142,6 +142,20 @@ func (sm *SnapshotMetadata) String() string {
 	return fmt.Sprintf("SnapshotMetadata{Height: %d, Format: %d, Chunks: %d, Hash: %x, Size: %d, AppHash: %x}", sm.Height, sm.Format, sm.Chunks, sm.Hash, sm.Size, sm.AppHash)
 }
 
+// Validate checks that the metadata is internally consistent. Metadata from
+// peers is untrusted, and state sync indexes ChunkHashes by chunk number, so a
+// chunk count that disagrees with the number of chunk hashes must be rejected
+// before use.
+func (sm *SnapshotMetadata) Validate() error {
+	if sm.Chunks == 0 {
+		return errors.New("snapshot has no chunks")
+	}
+	if uint64(len(sm.ChunkHashes)) != uint64(sm.Chunks) {
+		return fmt.Errorf("snapshot chunk count %d does not match %d chunk hashes", sm.Chunks, len(sm.ChunkHashes))
+	}
+	return nil
+}
+
 // SnapshotKey is a snapshot key used for lookups.
 type SnapshotKey [sha256.Size]byte
 

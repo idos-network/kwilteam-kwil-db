@@ -297,6 +297,11 @@ func (ss *StateSyncService) VerifySnapshot(ctx context.Context, snap *snapshotMe
 			continue
 		}
 
+		if err := meta.Validate(); err != nil {
+			ss.log.Warn("invalid snapshot metadata from trusted provider", "provider", provider.ID.String(), "error", err)
+			return VerificationInvalid, nil
+		}
+
 		// verify the snapshot metadata
 		if snap.Height != meta.Height || snap.Format != meta.Format || snap.Chunks != meta.Chunks {
 			ss.log.Warnf("snapshot metadata mismatch: expected %v, got %v", snap, meta)
