@@ -613,6 +613,14 @@ func (s *StateSyncService) requestSnapshotCatalogs(ctx context.Context, peer pee
 	s.snapshotPool.mtx.Lock()
 	defer s.snapshotPool.mtx.Unlock()
 	for _, snap := range snapshots {
+		if snap == nil {
+			s.log.Warn("Ignoring empty snapshot catalog entry", "provider", peer.ID)
+			continue
+		}
+		if err := snap.Validate(); err != nil {
+			s.log.Warn("Ignoring invalid snapshot", "height", snap.Height, "provider", peer.ID, "error", err)
+			continue
+		}
 		key := snap.Key()
 		s.snapshotPool.snapshots[key] = snap
 		s.snapshotPool.providers[key] = append(s.snapshotPool.providers[key], peer)
