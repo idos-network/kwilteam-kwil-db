@@ -108,22 +108,27 @@ const maxProposalClockDrift = time.Minute
 // and it is accepted once the local clock is within maxProposalClockDrift.
 var errProposalAhead = errors.New("block proposal timestamp is ahead of local time")
 
-// validateProposalTimestamp checks a live block proposal's timestamp: it must
-// be after the previous block's (when known) and no more than
-// maxProposalClockDrift ahead of now (errProposalAhead). It depends on the
+// checkProposalNotAhead returns errProposalAhead if a live block proposal's
+// timestamp is more than maxProposalClockDrift ahead of now. It depends on the
 // local clock, so it is only for voting on proposals, never for committed
-// blocks during sync or replay, which validateBlock also serves.
-func validateProposalTimestamp(stamp, prevStamp, now time.Time) error {
-	if !prevStamp.IsZero() && !stamp.After(prevStamp) {
-		return fmt.Errorf("block timestamp %s is not after the previous block timestamp %s",
-			stamp.Format(time.RFC3339Nano), prevStamp.Format(time.RFC3339Nano))
-	}
-
+// blocks during sync or replay.
+func checkProposalNotAhead(stamp, now time.Time) error {
 	if limit := now.Add(maxProposalClockDrift); stamp.After(limit) {
 		return fmt.Errorf("%w: %s is more than %s ahead of %s", errProposalAhead,
 			stamp.Format(time.RFC3339Nano), maxProposalClockDrift, now.Format(time.RFC3339Nano))
 	}
+	return nil
+}
 
+// validateProposalTimestamp checks that a live block proposal's timestamp is
+// after the previous block's, when known. An honest leader never breaks this
+// (see proposalTimestamp), so a failure is an invalid block. It is not part of
+// validateBlock, which also serves committed blocks during sync and replay.
+func validateProposalTimestamp(stamp, prevStamp time.Time) error {
+	if !prevStamp.IsZero() && !stamp.After(prevStamp) {
+		return fmt.Errorf("block timestamp %s is not after the previous block timestamp %s",
+			stamp.Format(time.RFC3339Nano), prevStamp.Format(time.RFC3339Nano))
+	}
 	return nil
 }
 

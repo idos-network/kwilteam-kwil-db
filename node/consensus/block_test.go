@@ -2,7 +2,7 @@ package consensus
 
 import (
 	"context"
-	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,37 +14,23 @@ import (
 )
 
 func TestValidateProposalTimestamp(t *testing.T) {
+	prev := time.UnixMilli(1_700_000_000_000).UTC()
+
+	require.NoError(t, validateProposalTimestamp(prev.Add(time.Millisecond), prev))
+	require.NoError(t, validateProposalTimestamp(prev.Add(6*time.Hour), prev))
+	require.NoError(t, validateProposalTimestamp(prev, time.Time{}), "no previous block")
+	require.Error(t, validateProposalTimestamp(prev, prev), "equal to previous")
+	require.Error(t, validateProposalTimestamp(prev.Add(-time.Millisecond), prev), "before previous")
+}
+
+func TestCheckProposalNotAhead(t *testing.T) {
 	now := time.UnixMilli(1_700_000_000_000).UTC()
-	prev := now.Add(-5 * time.Second)
 
-	tests := []struct {
-		name    string
-		stamp   time.Time
-		prev    time.Time
-		wantErr bool
-		ahead   bool // errProposalAhead: skipped, not Nacked
-	}{
-		{"now", now, prev, false, false},
-		{"1ms after previous", prev.Add(time.Millisecond), prev, false, false},
-		{"at drift limit", now.Add(maxProposalClockDrift), prev, false, false},
-		{"no previous block", now, time.Time{}, false, false},
-		{"equal to previous", prev, prev, true, false},
-		{"before previous", prev.Add(-time.Millisecond), prev, true, false},
-		{"past drift limit", now.Add(maxProposalClockDrift + time.Millisecond), prev, true, true},
-		{"hours ahead", now.Add(6 * time.Hour), prev, true, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateProposalTimestamp(tt.stamp, tt.prev, now)
-			if tt.wantErr {
-				require.Error(t, err)
-				require.Equal(t, tt.ahead, errors.Is(err, errProposalAhead))
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
+	require.NoError(t, checkProposalNotAhead(now, now))
+	require.NoError(t, checkProposalNotAhead(now.Add(-time.Hour), now))
+	require.NoError(t, checkProposalNotAhead(now.Add(maxProposalClockDrift), now), "at drift limit")
+	require.ErrorIs(t, checkProposalNotAhead(now.Add(maxProposalClockDrift+time.Millisecond), now), errProposalAhead)
+	require.ErrorIs(t, checkProposalNotAhead(now.Add(6*time.Hour), now), errProposalAhead)
 }
 
 func TestProposalTimestamp(t *testing.T) {
@@ -62,7 +48,7 @@ func TestProposalTimestamp(t *testing.T) {
 	prev := now.Truncate(time.Millisecond).Add(2 * time.Second)
 	stamp = proposalTimestamp(now, prev)
 	require.Equal(t, prev.Add(time.Millisecond).UTC(), stamp)
-	require.NoError(t, validateProposalTimestamp(stamp, prev, now))
+	require.NoError(t, validateProposalTimestamp(stamp, prev))
 
 	stamp = proposalTimestamp(prev, prev)
 	require.Equal(t, prev.Add(time.Millisecond).UTC(), stamp)
@@ -109,6 +95,36 @@ func TestProcessBlockProposalSkipsFutureTimestamp(t *testing.T) {
 
 	require.NoError(t, ce.processBlockProposal(context.Background(), prop))
 	require.Nil(t, ce.state.blkProp)
+	require.Never(t, func() bool { return len(acks) > 0 }, 200*time.Millisecond, 10*time.Millisecond)
+}
+
+type rollbackCountingProcessor struct {
+	stubBlockProcessor
+	rollbacks atomic.Int32
+}
+
+func (p *rollbackCountingProcessor) Rollback(context.Context, int64, ktypes.Hash) error {
+	p.rollbacks.Add(1)
+	return nil
+}
+
+// A future-dated proposal must be skipped before it can replace the active
+// proposal, or the rollback would discard work that is never redone.
+func TestProcessBlockProposalFutureTimestampKeepsActiveProposal(t *testing.T) {
+	ce, leaderKey, acks := proposalTestEngine(t, time.Now().Add(-time.Second))
+	bp := &rollbackCountingProcessor{}
+	ce.blockProcessor = bp
+
+	active := signedProposal(t, ce, leaderKey, time.Now())
+	res := &blockResult{}
+	ce.state.blkProp, ce.state.blockRes = active, res
+
+	future := signedProposal(t, ce, leaderKey, time.Now().Add(maxProposalClockDrift+time.Hour))
+	require.NoError(t, ce.processBlockProposal(context.Background(), future))
+
+	require.Same(t, active, ce.state.blkProp)
+	require.Same(t, res, ce.state.blockRes)
+	require.Zero(t, bp.rollbacks.Load())
 	require.Never(t, func() bool { return len(acks) > 0 }, 200*time.Millisecond, 10*time.Millisecond)
 }
 
