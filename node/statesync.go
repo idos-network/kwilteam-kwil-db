@@ -207,6 +207,13 @@ func (ss *StateSyncService) DoStatesync(ctx context.Context) (bool, error) {
 	if err := ss.blockStore.Store(blk, ci); err != nil {
 		return false, fmt.Errorf("failed to store statesync block to the blockstore %d: %w", height, err)
 	}
+
+	// The restore is only usable with its anchor block, so the marker set
+	// before the restore is cleared only now. If the block fetch fails, the
+	// next start drops the restored schemas and statesync runs again.
+	if err := ClearRestoreIncomplete(ss.rootDir); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
@@ -236,6 +243,17 @@ func (ss *StateSyncService) restoredAppHash(ctx context.Context, height int64) (
 func (ss *StateSyncService) fetchAnchorBlock(ctx context.Context, height int64, appHash types.Hash) (*ktypes.Block, *ktypes.CommitInfo, error) {
 	reqTimeout, recvTimeout, idleTimeout := blkReqTimeouts(ss.blockSyncCfg)
 	for _, provider := range ss.trustedProviders {
+		// The connection from Bootstrap may have dropped during a long restore,
+		// and its addresses may have expired from the peerstore. Connect is a
+		// no-op if still connected.
+		if err := ss.host.Connect(ctx, *provider); err != nil {
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			ss.log.Warn("failed to connect to trusted provider", "provider", provider.ID, "error", peers.CompressDialError(err))
+			continue
+		}
+
 		resp, err := requestBlockHeight(ctx, ss.host, provider.ID, height, blkReadLimit, reqTimeout, recvTimeout, idleTimeout)
 		if err != nil {
 			if ctx.Err() != nil {

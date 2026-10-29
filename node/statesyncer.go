@@ -108,9 +108,8 @@ func (s *StateSyncService) DiscoverSnapshots(ctx context.Context) (int64, error)
 					return -1, err
 				}
 
-				if err := ClearRestoreIncomplete(s.rootDir); err != nil {
-					return -1, err
-				}
+				// The restore marker stays set until DoStatesync has stored
+				// the anchor block.
 				return int64(snap.Height), nil
 			}
 			retry++
