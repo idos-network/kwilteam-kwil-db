@@ -470,6 +470,62 @@ func (n *Node) getBlkHeight(ctx context.Context, height int64) (types.Hash, []by
 	return getBlkHeight(ctx, height, n.host, n.log, n.blockSyncCfg)
 }
 
+// blkReqTimeouts returns the request, response and idle timeouts for block
+// requests, falling back to defaults if blockSyncCfg is nil.
+func blkReqTimeouts(blockSyncCfg *config.BlockSyncConfig) (req, recv, idle time.Duration) {
+	if blockSyncCfg == nil {
+		return 2 * time.Second, 20 * time.Second, 500 * time.Millisecond
+	}
+	return time.Duration(blockSyncCfg.RequestTimeout), time.Duration(blockSyncCfg.ResponseTimeout),
+		time.Duration(blockSyncCfg.IdleTimeout)
+}
+
+// blkHeightResp is a decoded block height response.
+type blkHeightResp struct {
+	hash      types.Hash
+	ci        *ktypes.CommitInfo
+	rawBlk    []byte
+	theirBest int64 // -1 if the peer did not send its best height
+}
+
+// decodeBlkHeightResp decodes the data of a block height response: the block
+// hash, commit info, raw block and, optionally, the peer's best height.
+func decodeBlkHeightResp(resp []byte) (*blkHeightResp, error) {
+	if len(resp) < types.HashLen+1 {
+		return nil, errors.New("block response too short")
+	}
+
+	rd := bytes.NewReader(resp)
+	r := &blkHeightResp{theirBest: -1}
+
+	if _, err := io.ReadFull(rd, r.hash[:]); err != nil {
+		return nil, fmt.Errorf("failed to read block hash: %w", err)
+	}
+
+	ciBts, err := ktypes.ReadCompactBytes(rd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read commit info: %w", err)
+	}
+	r.ci = new(ktypes.CommitInfo)
+	if err = r.ci.UnmarshalBinary(ciBts); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal commit info: %w", err)
+	}
+
+	if r.rawBlk, err = ktypes.ReadCompactBytes(rd); err != nil {
+		return nil, fmt.Errorf("failed to read block: %w", err)
+	}
+
+	var theirBest int64
+	err = binary.Read(rd, binary.LittleEndian, &theirBest)
+	if err == nil {
+		r.theirBest = theirBest
+	} else if !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("failed to read best block height: %w", err)
+	} // else the peer didn't want to send it (this is backwards compatible)
+
+	return r, nil
+}
+
 func getBlkHeight(ctx context.Context, height int64, host host.Host, log log.Logger, blockSyncCfg *config.BlockSyncConfig) (types.Hash, []byte, *ktypes.CommitInfo, int64, error) {
 	allPeers := peerHosts(host)
 	if len(allPeers) == 0 {
@@ -527,14 +583,7 @@ func getBlkHeight(ctx context.Context, height int64, host host.Host, log log.Log
 		}
 
 		t0 := time.Now()
-		reqTimeout := 2 * time.Second
-		recvTimeout := 20 * time.Second
-		idleTimeout := 500 * time.Millisecond
-		if blockSyncCfg != nil {
-			reqTimeout = time.Duration(blockSyncCfg.RequestTimeout)
-			recvTimeout = time.Duration(blockSyncCfg.ResponseTimeout)
-			idleTimeout = time.Duration(blockSyncCfg.IdleTimeout)
-		}
+		reqTimeout, recvTimeout, idleTimeout := blkReqTimeouts(blockSyncCfg)
 		resp, err := requestBlockHeight(ctx, host, peer, height, blkReadLimit, reqTimeout, recvTimeout, idleTimeout)
 		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrBlkNotFound) {
 			notFoundCount++
@@ -570,56 +619,25 @@ func getBlkHeight(ctx context.Context, height int64, host host.Host, log log.Log
 			continue
 		}
 
-		if len(resp) < types.HashLen+1 {
-			log.Warnf("block response too short")
-			continue
-		}
-
 		log.Debug("obtained block contents", "height", height, "elapsed", time.Since(t0))
 
-		rd := bytes.NewReader(resp)
-		var hash types.Hash
-
-		if _, err := io.ReadFull(rd, hash[:]); err != nil {
-			log.Warn("failed to read block hash in the block response", "error", err)
+		r, err := decodeBlkHeightResp(resp)
+		if err != nil {
+			log.Warn("invalid block response", "peer", peer, "error", err)
 			continue
 		}
 
-		ciBts, err := ktypes.ReadCompactBytes(rd)
-		if err != nil {
-			log.Info("failed to read commit info in the block response", "error", err)
-			continue
-		}
-
-		var ci ktypes.CommitInfo
-		if err = ci.UnmarshalBinary(ciBts); err != nil {
-			log.Warn("failed to unmarshal commit info", "error", err)
-			continue
-		}
-
-		rawBlk, err := ktypes.ReadCompactBytes(rd)
-		if err != nil {
-			log.Warn("failed to read block in the block response", "error", err)
-		}
-
-		var theirBest int64
-		err = binary.Read(rd, binary.LittleEndian, &theirBest)
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				log.Info("failed to read best block height", "error", err)
-				continue
-			} // else the peer didn't want to send it (this is backwards compatible)
-		} else {
-			if theirBest > bestHeight {
-				bestHeight = theirBest
+		if r.theirBest >= 0 {
+			if r.theirBest > bestHeight {
+				bestHeight = r.theirBest
 			}
 			// Update our cache - this peer has at least the requested height
-			peerBest.Store(peer, peerInfo{height: max(theirBest, height), seenAt: time.Now()})
+			peerBest.Store(peer, peerInfo{height: max(r.theirBest, height), seenAt: time.Now()})
 		}
 
-		mets.DownloadedBlock(context.Background(), height, int64(len(rawBlk)))
+		mets.DownloadedBlock(context.Background(), height, int64(len(r.rawBlk)))
 
-		return hash, rawBlk, &ci, bestHeight, nil
+		return r.hash, r.rawBlk, r.ci, bestHeight, nil
 	}
 
 	// Being here, we did not find the block on any peer, either because of

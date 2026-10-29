@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/trufnetwork/kwil-db/config"
 	"github.com/trufnetwork/kwil-db/core/log"
 	ktypes "github.com/trufnetwork/kwil-db/core/types"
+	"github.com/trufnetwork/kwil-db/node/meta"
 	"github.com/trufnetwork/kwil-db/node/peers"
 	"github.com/trufnetwork/kwil-db/node/snapshotter"
 	"github.com/trufnetwork/kwil-db/node/types"
@@ -173,32 +175,120 @@ func (ss *StateSyncService) DoStatesync(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
+	// The restored state was verified against the app hash from the trusted
+	// providers, so the anchor block must commit to that app hash.
+	appHash, err := ss.restoredAppHash(ctx, height)
+	if err != nil {
+		return false, err
+	}
+
 	// request and commit the block to the blockstore
 	const maxBlockRetries = 20
 	const retryBackoff = 2 * time.Second
-	var rawBlk []byte
+	var blk *ktypes.Block
 	var ci *ktypes.CommitInfo
 	for attempt := 1; attempt <= maxBlockRetries; attempt++ {
 		ss.log.Info("Attempting to fetch statesync block", "height", height, "attempt", attempt)
-		_, rawBlk, ci, _, err = getBlkHeight(ctx, height, ss.host, ss.log, ss.blockSyncCfg)
+		blk, ci, err = ss.fetchAnchorBlock(ctx, height, appHash)
 		if err == nil {
 			break
 		}
 		ss.log.Warn("Block fetch failed, retrying after backoff", "error", err, "backoff", retryBackoff)
-		time.Sleep(retryBackoff)
+		select {
+		case <-time.After(retryBackoff):
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
 	}
 	if err != nil {
 		return false, fmt.Errorf("failed to get statesync block %d after %d attempts: %w", height, maxBlockRetries, err)
-	}
-	blk, err := ktypes.DecodeBlock(rawBlk)
-	if err != nil {
-		return false, fmt.Errorf("failed to decode statesync block %d: %w", height, err)
 	}
 	// store block
 	if err := ss.blockStore.Store(blk, ci); err != nil {
 		return false, fmt.Errorf("failed to store statesync block to the blockstore %d: %w", height, err)
 	}
 	return true, nil
+}
+
+// restoredAppHash returns the app hash of the state restored from the snapshot
+// at height.
+func (ss *StateSyncService) restoredAppHash(ctx context.Context, height int64) (types.Hash, error) {
+	tx, err := ss.db.BeginReadTx(ctx)
+	if err != nil {
+		return types.Hash{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	h, appHash, _, err := meta.GetChainState(ctx, tx)
+	if err != nil {
+		return types.Hash{}, fmt.Errorf("failed to read restored chain state: %w", err)
+	}
+	if h != height || len(appHash) != types.HashLen {
+		return types.Hash{}, fmt.Errorf("unexpected restored chain state: height %d (want %d), app hash %x", h, height, appHash)
+	}
+	return types.Hash(appHash), nil
+}
+
+// fetchAnchorBlock fetches the block at the snapshot height from the trusted
+// providers. Any peer can answer a block request, so only the providers that
+// verified the snapshot are asked, and the block must still pass
+// verifyAnchorBlock.
+func (ss *StateSyncService) fetchAnchorBlock(ctx context.Context, height int64, appHash types.Hash) (*ktypes.Block, *ktypes.CommitInfo, error) {
+	reqTimeout, recvTimeout, idleTimeout := blkReqTimeouts(ss.blockSyncCfg)
+	for _, provider := range ss.trustedProviders {
+		resp, err := requestBlockHeight(ctx, ss.host, provider.ID, height, blkReadLimit, reqTimeout, recvTimeout, idleTimeout)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			ss.log.Warn("failed to get statesync block from trusted provider", "provider", provider.ID, "error", err)
+			continue
+		}
+
+		r, err := decodeBlkHeightResp(resp)
+		if err != nil {
+			ss.log.Warn("invalid statesync block response from trusted provider", "provider", provider.ID, "error", err)
+			continue
+		}
+		blk, err := ktypes.DecodeBlock(r.rawBlk)
+		if err != nil {
+			ss.log.Warn("failed to decode statesync block from trusted provider", "provider", provider.ID, "error", err)
+			continue
+		}
+		if err := verifyAnchorBlock(height, appHash, r.hash, blk, r.ci); err != nil {
+			ss.log.Warn("trusted provider sent an invalid statesync block", "provider", provider.ID, "error", err)
+			continue
+		}
+
+		return blk, r.ci, nil
+	}
+
+	return nil, nil, fmt.Errorf("no trusted provider returned a valid block at height %d", height)
+}
+
+// verifyAnchorBlock checks that blk is the block at height with hash, that its
+// transactions match its header, and that ci commits to appHash, the app hash
+// of the restored snapshot state.
+func verifyAnchorBlock(height int64, appHash, hash types.Hash, blk *ktypes.Block, ci *ktypes.CommitInfo) error {
+	if blk.Header.Height != height {
+		return fmt.Errorf("block height %d does not match snapshot height %d", blk.Header.Height, height)
+	}
+	if blkHash := blk.Hash(); blkHash != hash {
+		return fmt.Errorf("block hash %s does not match the response hash %s", blkHash, hash)
+	}
+	if blk.Header.NumTxns != uint32(len(blk.Txns)) {
+		return fmt.Errorf("transaction count mismatch, header %d, block %d", blk.Header.NumTxns, len(blk.Txns))
+	}
+	if merkleRoot := blk.CalcMerkleRoot(); merkleRoot != blk.Header.MerkleRoot {
+		return fmt.Errorf("merkle root mismatch, header %s, computed %s", blk.Header.MerkleRoot, merkleRoot)
+	}
+	if ci == nil {
+		return errors.New("missing commit info")
+	}
+	if ci.AppHash != appHash {
+		return fmt.Errorf("commit info app hash %s does not match the snapshot app hash %s", ci.AppHash, appHash)
+	}
+	return nil
 }
 
 // blkGetHeightRequestHandler handles the incoming block requests for a given height.
@@ -224,6 +314,7 @@ func (ss *StateSyncService) blkGetHeightRequestHandler(stream network.Stream) {
 		// maybe we remove hash from the protocol, was thinking receiver could
 		// hang up earlier depending...
 		stream.SetWriteDeadline(time.Now().Add(defaultBlkSendTimeout))
+		stream.Write(withData) // requestBlockHeight expects the flag, as from Node.blkGetHeightStreamHandler
 		stream.Write(hash[:])
 		ktypes.WriteCompactBytes(stream, ciBytes)
 		ktypes.WriteCompactBytes(stream, rawBlk)
