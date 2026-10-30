@@ -3480,6 +3480,48 @@ func newTestInterp(t *testing.T, tx sql.DB, seeds []string, includeTestTables bo
 	return interp
 }
 
+// Mempool admission reads action modifiers and ownership without executing.
+func Test_AdmissionLookups(t *testing.T) {
+	db := newTestDB(t, nil, nil)
+
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx) // always rollback
+
+	interp := newTestInterp(t, tx, []string{
+		`CREATE ACTION write_act() public { }`,
+		`CREATE ACTION read_act() public view { }`,
+		`CREATE ACTION owner_act() public owner { }`,
+		`CREATE ACTION private_act() private { }`,
+	}, false)
+
+	tests := []struct {
+		namespace, action string
+		found             bool
+		want              []precompiles.Modifier
+	}{
+		{"", "write_act", true, []precompiles.Modifier{precompiles.PUBLIC}},
+		{"main", "READ_ACT", true, []precompiles.Modifier{precompiles.PUBLIC, precompiles.VIEW}},
+		{"MAIN", "owner_act", true, []precompiles.Modifier{precompiles.PUBLIC, precompiles.OWNER}},
+		{"main", "private_act", true, []precompiles.Modifier{precompiles.PRIVATE}},
+		{"main", "missing", false, nil},
+		{"missing", "write_act", false, nil},
+		// built-in functions are not callable as actions
+		{"main", "abs", false, nil},
+	}
+	for _, test := range tests {
+		mods, found := interp.ActionModifiers(test.namespace, test.action)
+		require.Equalf(t, test.found, found, "%s.%s", test.namespace, test.action)
+		for _, m := range test.want {
+			require.Truef(t, mods.Has(m), "%s.%s should have %s", test.namespace, test.action, m)
+		}
+	}
+
+	require.True(t, interp.IsOwner(defaultCaller))
+	require.False(t, interp.IsOwner("someone_else"))
+}
+
 // This tests that dropping a namespace invalidates the statement cache.
 // If the cache is not invalidated, the test will fail because it will try to insert
 // a string into an integer column.

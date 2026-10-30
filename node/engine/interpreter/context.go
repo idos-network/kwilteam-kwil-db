@@ -875,6 +875,9 @@ type executable struct {
 	// It is a pointer to a slice because it may be nil;
 	// it is only set if the function is a precompile or action.
 	ExpectedArgs *[]*types.DataType
+	// Modifiers are the access modifiers of an action or precompile method.
+	// They are enforced by Func; this copy only lets mempool admission read them.
+	Modifiers precompiles.Modifiers
 }
 
 type executableType string
