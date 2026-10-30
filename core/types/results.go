@@ -57,9 +57,6 @@ var (
 	ErrTxTooLarge            = errors.New("transaction size limit exceeded")
 	ErrUnknownPayloadType    = errors.New("unknown payload type")
 	ErrDisallowedInMigration = errors.New("transaction type not allowed during migration")
-	// ErrTxNotAdmitted is returned by mempool admission for transactions that
-	// would fail or do nothing in a block, e.g. view calls.
-	ErrTxNotAdmitted = errors.New("transaction not admitted to mempool")
 )
 
 // BroadcastErrorToCode converts an error from a broadcast method to a TxCode.
@@ -85,7 +82,7 @@ func BroadcastErrorToCode(err error) TxCode {
 	if errors.Is(err, ErrMempoolFull) {
 		return CodeMempoolFull
 	}
-	if errors.Is(err, ErrUnknownPayloadType) || errors.Is(err, ErrTxNotAdmitted) {
+	if errors.Is(err, ErrUnknownPayloadType) {
 		return CodeInvalidTxType
 	}
 	if errors.Is(err, ErrDisallowedInMigration) {

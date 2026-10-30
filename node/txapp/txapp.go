@@ -60,11 +60,6 @@ func NewTxApp(ctx context.Context, db sql.Executor, engine common.Engine, signer
 	resTypes := resolutions.ListResolutions()
 	slices.Sort(resTypes)
 
-	admission, ok := engine.(admissionEngine)
-	if !ok {
-		service.Logger.Warn("engine does not support mempool admission checks; all payloads will be admitted")
-	}
-
 	t := &TxApp{
 		Engine:     engine,
 		Accounts:   accounts,
@@ -75,7 +70,6 @@ func NewTxApp(ctx context.Context, db sql.Executor, engine common.Engine, signer
 			accounts:     make(map[string]*types.Account),
 			accountMgr:   accounts,
 			validatorMgr: validators,
-			engine:       admission,
 			nodeIdent:    signer,
 			log:          service.Logger.New("mempool"),
 		},

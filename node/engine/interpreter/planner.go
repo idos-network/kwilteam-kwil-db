@@ -84,7 +84,6 @@ func makeActionToExecutable(namespace string, act *action) *executable {
 	return &executable{
 		Name:         act.Name,
 		ExpectedArgs: &expectedArgs,
-		Modifiers:    act.Modifiers,
 		Func: func(exec *executionContext, args []Value, fn resultFunc) error {
 			if err := exec.canExecute(namespace, act.Name, act.Modifiers); err != nil {
 				return err
