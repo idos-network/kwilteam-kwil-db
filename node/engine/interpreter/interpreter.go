@@ -90,35 +90,6 @@ func (t *ThreadSafeInterpreter) ExecuteWithoutEngineCtx(ctx context.Context, db 
 	return t.Execute(newInvalidEngineCtx(ctx), db, statement, params, fn)
 }
 
-// ActionModifiers returns the access modifiers of an action or extension
-// method that a transaction can call. found is false if the namespace or
-// action does not exist. Nothing is executed.
-func (t *ThreadSafeInterpreter) ActionModifiers(namespace, action string) (mods precompiles.Modifiers, found bool) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	if namespace == "" {
-		namespace = engine.DefaultNamespace
-	}
-	ns, ok := t.i.namespaces[strings.ToLower(namespace)]
-	if !ok {
-		return nil, false
-	}
-	exec, ok := ns.availableFunctions[strings.ToLower(action)]
-	if !ok || (exec.Type != executableTypeAction && exec.Type != executableTypePrecompile) {
-		return nil, false
-	}
-	return exec.Modifiers, true
-}
-
-// IsOwner reports whether the user identifier is the database owner.
-func (t *ThreadSafeInterpreter) IsOwner(user string) bool {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	return t.i.accessController.IsOwner(user)
-}
-
 // recursiveInterpreter is an interpreter that can call itself.
 // It is used for extensions that need to call back into the interpreter.
 type recursiveInterpreter struct {

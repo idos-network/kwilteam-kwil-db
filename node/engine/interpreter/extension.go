@@ -44,7 +44,6 @@ func initializeExtension(ctx context.Context, svc *common.Service, db sql.DB, i 
 		exec := &executable{
 			Name:         lowerName,
 			ExpectedArgs: &expectedArgs,
-			Modifiers:    method.AccessModifiers,
 			Func: func(exec *executionContext, args []Value, fn resultFunc) error {
 				if err := exec.canExecute(alias, lowerName, method.AccessModifiers); err != nil {
 					return err
