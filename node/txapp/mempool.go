@@ -14,13 +14,23 @@ import (
 	"github.com/trufnetwork/kwil-db/core/log"
 	"github.com/trufnetwork/kwil-db/core/types"
 	authExt "github.com/trufnetwork/kwil-db/extensions/auth"
+	"github.com/trufnetwork/kwil-db/extensions/precompiles"
 	"github.com/trufnetwork/kwil-db/node/types/sql"
 	"github.com/trufnetwork/kwil-db/node/voting"
 )
 
+// admissionEngine is the part of the interpreter that mempool admission reads.
+type admissionEngine interface {
+	ActionModifiers(namespace, action string) (mods precompiles.Modifiers, found bool)
+	IsOwner(user string) bool
+}
+
 type mempool struct {
 	accountMgr   Accounts
 	validatorMgr Validators
+	// engine is nil if the engine cannot answer admission queries, in which
+	// case checkAdmission accepts everything.
+	engine admissionEngine
 
 	accounts map[string]*types.Account
 	acctsMtx sync.Mutex // protects accounts
@@ -60,6 +70,62 @@ func (m *mempool) accountInfoSafe(ctx context.Context, tx sql.Executor, acctID *
 	return m.accountInfo(ctx, tx, acctID)
 }
 
+// checkAdmission rejects transactions that would fail or do nothing in a block.
+// With gas disabled they cost the sender nothing, so without this check
+// anyone could fill blocks with them. It is a mempool policy only: block
+// execution does not change, so a proposer that skips it does not fork.
+//
+// The database owner may send anything. Other senders may not send raw SQL,
+// may not execute actions that are unknown, VIEW, PRIVATE, SYSTEM or OWNER,
+// and may not send validator-only payloads unless they are validators.
+func (m *mempool) checkAdmission(ctx *common.TxContext, tx *types.Transaction) error {
+	if m.engine == nil || m.engine.IsOwner(ctx.Caller) {
+		return nil
+	}
+
+	switch tx.Body.PayloadType {
+	case types.PayloadTypeRawStatement:
+		return fmt.Errorf("%w: raw statements are only accepted from the database owner", types.ErrTxNotAdmitted)
+
+	case types.PayloadTypeExecute:
+		exec := &types.ActionExecution{}
+		if err := exec.UnmarshalBinary(tx.Body.Payload); err != nil {
+			return err
+		}
+
+		mods, found := m.engine.ActionModifiers(exec.Namespace, exec.Action)
+		switch {
+		case !found:
+			return fmt.Errorf("%w: action %q does not exist in namespace %q", types.ErrTxNotAdmitted, exec.Action, exec.Namespace)
+		case mods.Has(precompiles.VIEW):
+			return fmt.Errorf("%w: action %q is a view; use call instead", types.ErrTxNotAdmitted, exec.Action)
+		case mods.Has(precompiles.PRIVATE), mods.Has(precompiles.SYSTEM):
+			return fmt.Errorf("%w: action %q cannot be called directly", types.ErrTxNotAdmitted, exec.Action)
+		case mods.Has(precompiles.OWNER):
+			return fmt.Errorf("%w: action %q can only be executed by the owner", types.ErrTxNotAdmitted, exec.Action)
+		}
+
+	case types.PayloadTypeValidatorLeave,
+		types.PayloadTypeValidatorApprove,
+		types.PayloadTypeValidatorRemove,
+		types.PayloadTypeCreateResolution,
+		types.PayloadTypeApproveResolution:
+		keyType, err := authExt.GetAuthenticatorKeyType(tx.Signature.Type)
+		if err != nil {
+			return fmt.Errorf("%w: %s from a non-validator", types.ErrTxNotAdmitted, tx.Body.PayloadType)
+		}
+		power, err := m.validatorMgr.GetValidatorPower(ctx.Ctx, tx.Sender, keyType)
+		if err != nil {
+			return err
+		}
+		if power <= 0 {
+			return fmt.Errorf("%w: %s from a non-validator", types.ErrTxNotAdmitted, tx.Body.PayloadType)
+		}
+	}
+
+	return nil
+}
+
 // applyTransaction validates account specific info and applies valid transactions to the mempool state.
 func (m *mempool) applyTransaction(ctx *common.TxContext, tx *types.Transaction, dbTx sql.Executor, rebroadcaster Rebroadcaster) error {
 	if tx == nil || tx.Signature == nil {
@@ -71,6 +137,10 @@ func (m *mempool) applyTransaction(ctx *common.TxContext, tx *types.Transaction,
 	}
 
 	if err := types.ValidatePayloadEncoding(tx.Body.PayloadType, tx.Body.Payload); err != nil {
+		return err
+	}
+
+	if err := m.checkAdmission(ctx, tx); err != nil {
 		return err
 	}
 
