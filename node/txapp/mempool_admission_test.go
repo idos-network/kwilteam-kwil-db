@@ -10,7 +10,12 @@ import (
 	"github.com/trufnetwork/kwil-db/core/log"
 	"github.com/trufnetwork/kwil-db/core/types"
 	"github.com/trufnetwork/kwil-db/extensions/precompiles"
+	"github.com/trufnetwork/kwil-db/node/engine/interpreter"
 )
+
+// The node's engine must support admission; otherwise NewTxApp falls back to
+// admitting everything.
+var _ admissionEngine = (*interpreter.ThreadSafeInterpreter)(nil)
 
 type mockAdmissionEngine struct {
 	owner   string
