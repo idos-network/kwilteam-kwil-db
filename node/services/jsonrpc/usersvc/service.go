@@ -43,6 +43,7 @@ import (
 type EngineReader interface {
 	Call(ctx *common.EngineContext, tx sql.DB, namespace, action string, args []any, resultFn func(*common.Row) error) (*common.CallResult, error)
 	Execute(ctx *common.EngineContext, tx sql.DB, query string, params map[string]any, resultFn func(*common.Row) error) error
+	IsOwner(user string) bool
 }
 
 type BlockchainTransactor interface {
@@ -666,6 +667,13 @@ func (svc *Service) AuthenticatedQuery(ctx context.Context, req *userjson.Authen
 		BlockContext: txCtx.BlockContext,
 	}); jsonRPCErr != nil {
 		return nil, jsonRPCErr
+	}
+
+	// Ad-hoc SQL is owner-only. Otherwise any signer gets arbitrary reads with
+	// the namespace SELECT checks as the only guard, and unbounded query cost.
+	if !svc.engine.IsOwner(txCtx.Caller) {
+		return nil, jsonrpc.NewError(jsonrpc.ErrorAuthenticatedQueryOwnerOnly,
+			"authenticated query is restricted to the database owner", nil)
 	}
 
 	params := make(map[string]any)
