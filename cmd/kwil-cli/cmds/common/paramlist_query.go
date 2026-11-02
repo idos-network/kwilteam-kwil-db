@@ -28,7 +28,9 @@ func QueryForParamList(ctx context.Context, cl clientType.Client, query string, 
 		// authenticated_query when a signer exists; without a signer there is no
 		// alternative RPC to try (retrying with skipAuth=false still calls user.query).
 		return nil, err
-	case jsonrpc.ErrorAuthenticatedQueryRequiresPrivateRPC:
+	case jsonrpc.ErrorAuthenticatedQueryRequiresPrivateRPC, jsonrpc.ErrorAuthenticatedQueryOwnerOnly:
+		// Non-owner signers fall back to user.query, which works unless the
+		// node is in private mode.
 		if cl.Signer() != nil {
 			return cl.Query(ctx, query, args, true)
 		}

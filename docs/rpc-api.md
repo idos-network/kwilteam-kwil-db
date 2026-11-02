@@ -64,7 +64,7 @@ On error, the response contains `"error": {"code": ..., "message": "..."}` inste
 | `user.call` | CallMessage (action name, args, etc.) | Call a view/action |
 | `user.databases` | `{"owner": hex?}` | List databases (namespaces) |
 | `user.query` | `{"query": string, "params": object?}` | Ad-hoc read-only SQL |
-| `user.authenticated_query` | AuthenticatedQuery | Ad-hoc SQL with auth |
+| `user.authenticated_query` | AuthenticatedQuery | Ad-hoc SQL with auth; database owner only (`-1009` otherwise) |
 | `user.estimate_price` | `{"tx": Transaction}` | Estimate tx fee |
 | `user.tx_query` | `{"tx_hash": hash}` | Transaction status/result |
 | `user.schema` | `{"namespace": string}` | Schema metadata for a namespace |

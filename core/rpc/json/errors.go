@@ -60,6 +60,9 @@ const (
 	// ErrorAuthenticatedQueryRequiresPrivateRPC is returned by nodes that reject
 	// user.authenticated_query while RPC private mode is disabled.
 	ErrorAuthenticatedQueryRequiresPrivateRPC ErrorCode = -1008
+	// ErrorAuthenticatedQueryOwnerOnly is returned when a signer other than the
+	// database owner calls user.authenticated_query.
+	ErrorAuthenticatedQueryOwnerOnly ErrorCode = -1009
 )
 
 // More detailed errors use a structured error type in the "data" field of the
