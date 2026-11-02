@@ -47,7 +47,7 @@ type BlockProcessor interface {
 	InitChain(ctx context.Context) (int64, []byte, error)
 	SetCallbackFns(applyBlockFn blockprocessor.BroadcastTxFn, addPeer, removePeer func(string) error)
 
-	PrepareProposal(ctx context.Context, txs []*types.Tx) (finalTxs []*ktypes.Transaction, invalidTxs []*ktypes.Transaction, err error)
+	PrepareProposal(ctx context.Context, txs []*types.Tx, blockTime time.Time) (finalTxs []*ktypes.Transaction, invalidTxs []*ktypes.Transaction, err error)
 	ExecuteBlock(ctx context.Context, req *ktypes.BlockExecRequest, syncing bool) (*ktypes.BlockExecResult, error)
 	Commit(ctx context.Context, req *ktypes.CommitRequest) error
 	Rollback(ctx context.Context, height int64, appHash ktypes.Hash) error

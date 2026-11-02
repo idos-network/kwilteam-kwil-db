@@ -225,7 +225,11 @@ func (ce *ConsensusEngine) createBlockProposal(ctx context.Context) (*blockPropo
 	totalTxSizeLimit := ce.ConsensusParams().MaxBlockSize
 	txns := ce.mempool.PeekN(maxNumTxnsInBlock, int(totalTxSizeLimit))
 
-	finalTxs, invalidTxs, err := ce.blockProcessor.PrepareProposal(ctx, txns)
+	// Stamp first: PrepareProposal drops txs whose auth is invalid at this time.
+	_, prevStamp := ce.lastBlockInternal()
+	stamp := proposalTimestamp(time.Now(), prevStamp)
+
+	finalTxs, invalidTxs, err := ce.blockProcessor.PrepareProposal(ctx, txns, stamp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare proposal: %w", err)
 	}
@@ -238,8 +242,6 @@ func (ce *ConsensusEngine) createBlockProposal(ctx context.Context) (*blockPropo
 
 	valSetHash := ce.validatorSetHash()
 	paramsHash := ce.blockProcessor.ConsensusParams().Hash()
-	_, prevStamp := ce.lastBlockInternal()
-	stamp := proposalTimestamp(time.Now(), prevStamp)
 	blk := ktypes.NewBlock(ce.state.lc.height+1, ce.state.lc.blkHash, ce.state.lc.appHash, valSetHash, paramsHash, stamp, finalTxs)
 
 	// add the leader updates to the block header if any

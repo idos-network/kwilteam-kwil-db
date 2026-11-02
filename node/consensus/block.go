@@ -415,9 +415,9 @@ func (ce *ConsensusEngine) commit(ctx context.Context, syncing bool) (err error)
 	// to be rejected if the are larger than the new max block size.
 	ce.mempool.CapMaxTxSize(maxBlockSize)
 
-	// recheck the transactions in the mempool
-	lh, time := ce.lastBlockInternal()
-	ce.blockProcessor.RecheckTxs(ctx, lh, time)
+	// recheck the transactions in the mempool against the block just
+	// committed; ce.state.lc still holds the previous one until nextState().
+	ce.blockProcessor.RecheckTxs(ctx, height, blkProp.blk.Header.Timestamp)
 
 	// should there be smaller limit to accommodate for the block serialization?
 	sz, _ := ce.mempool.Size()

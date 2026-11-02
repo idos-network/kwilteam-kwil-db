@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
+	"github.com/trufnetwork/kwil-db/common"
 	"github.com/trufnetwork/kwil-db/core/types"
 	authExt "github.com/trufnetwork/kwil-db/extensions/auth"
 	"github.com/trufnetwork/kwil-db/node/txapp"
@@ -68,7 +70,16 @@ type indexedTxn struct {
 // enforces block size limits, and applies the maxVotesPerTx limit for voteID transactions.
 // Additionally, it includes the ValidatorVoteBody transaction for unresolved events.
 // The final transaction order is: MempoolProposerTxns, ValidatorVoteBodyTx, Other MempoolTxns (Nonce ordered, stable sorted).
-func (bp *BlockProcessor) prepareBlockTransactions(ctx context.Context, readTx sql.Tx, txs []*nodetypes.Tx) (finalTxs []*types.Transaction, invalidTxs []*types.Transaction, err error) {
+func (bp *BlockProcessor) prepareBlockTransactions(ctx context.Context, readTx sql.Tx, txs []*nodetypes.Tx, blockTime time.Time) (finalTxs []*types.Transaction, invalidTxs []*types.Transaction, err error) {
+	// Context-bound auth is verified against the block being proposed, the
+	// same way ExecuteBlock will verify it.
+	verifyCtx := authExt.VerifyContext{BlockContext: &common.BlockContext{
+		ChainContext: bp.chainCtx,
+		Height:       bp.height.Load() + 1,
+		Timestamp:    blockTime.Unix(),
+		Proposer:     bp.signer.PubKey(),
+	}}
+
 	// Unmarshal and index the transactions.
 	var okTxns []*indexedTxn
 	invalidTxs = make([]*types.Transaction, 0, len(txs))
@@ -115,6 +126,18 @@ func (bp *BlockProcessor) prepareBlockTransactions(ctx context.Context, readTx s
 		if tx.Body == nil || tx.Body.Fee == nil || tx.Body.Fee.Sign() < 0 {
 			invalidTxs = append(invalidTxs, txs[tx.is].Transaction)
 			bp.log.Warn("Dropping tx with invalid fee while preparing the block", "tx", tx)
+			continue
+		}
+
+		// Drop txs whose context-bound auth (e.g. an expired token) fails for
+		// this block, so the leader does not propose a tx that cannot run.
+		requiresContext, err := authExt.RequiresContext(tx.Signature.Type)
+		if err == nil && requiresContext {
+			err = verifyTransactionWithContext(verifyCtx, tx.Transaction)
+		}
+		if err != nil {
+			invalidTxs = append(invalidTxs, txs[tx.is].Transaction)
+			bp.log.Warn("Dropping tx with invalid authentication while preparing the block", "tx", tx.hash, "error", err)
 			continue
 		}
 

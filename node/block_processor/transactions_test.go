@@ -290,7 +290,7 @@ func TestPrepareMempoolTxns(t *testing.T) {
 			readTx, err := bp.db.BeginReadTx(ctx)
 			require.NoError(t, err)
 
-			got, invalids, err := bp.prepareBlockTransactions(ctx, readTx, ntxs)
+			got, invalids, err := bp.prepareBlockTransactions(ctx, readTx, ntxs, time.Now())
 			require.NoError(t, err)
 
 			if len(got) != len(tt.want) {
@@ -955,7 +955,7 @@ func TestMissingSignatureRejected(t *testing.T) {
 		},
 		Sender: edPubKey([]byte(`guy`)),
 	}
-	finalTxs, invalidTxs, err := bp.prepareBlockTransactions(context.Background(), nil, []*nodetypes.Tx{nodetypes.NewTx(unsigned)})
+	finalTxs, invalidTxs, err := bp.prepareBlockTransactions(context.Background(), nil, []*nodetypes.Tx{nodetypes.NewTx(unsigned)}, time.Now())
 	require.NoError(t, err)
 	require.Empty(t, finalTxs)
 	require.Len(t, invalidTxs, 1)
@@ -991,7 +991,7 @@ func TestMissingSignatureRejected(t *testing.T) {
 		nodetypes.NewTx(unsigned),
 		nodetypes.NewTx(distinct),
 		nodetypes.NewTx(duplicate),
-	})
+	}, time.Now())
 	require.NoError(t, err)
 	require.Len(t, finalTxs, 2)
 	require.Equal(t, signed.Hash(), finalTxs[0].Hash())
