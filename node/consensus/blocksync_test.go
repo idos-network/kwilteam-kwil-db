@@ -225,7 +225,7 @@ func (bp *testBlockProcessor) InitChain(ctx context.Context) (int64, []byte, err
 }
 func (bp *testBlockProcessor) SetCallbackFns(applyBlockFn blockprocessor.BroadcastTxFn, addPeer, removePeer func(string) error) {
 }
-func (bp *testBlockProcessor) PrepareProposal(ctx context.Context, txs []*types.Tx) ([]*ktypes.Transaction, []*ktypes.Transaction, error) {
+func (bp *testBlockProcessor) PrepareProposal(ctx context.Context, txs []*types.Tx, blockTime time.Time) ([]*ktypes.Transaction, []*ktypes.Transaction, error) {
 	return nil, nil, nil
 }
 func (bp *testBlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExecRequest, syncing bool) (*ktypes.BlockExecResult, error) {

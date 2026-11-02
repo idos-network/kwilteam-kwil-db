@@ -391,7 +391,7 @@ type stubBlockProcessor struct{}
 func (stubBlockProcessor) InitChain(context.Context) (int64, []byte, error) { return 0, nil, nil }
 func (stubBlockProcessor) SetCallbackFns(blockprocessor.BroadcastTxFn, func(string) error, func(string) error) {
 }
-func (stubBlockProcessor) PrepareProposal(context.Context, []*types.Tx) ([]*ktypes.Transaction, []*ktypes.Transaction, error) {
+func (stubBlockProcessor) PrepareProposal(context.Context, []*types.Tx, time.Time) ([]*ktypes.Transaction, []*ktypes.Transaction, error) {
 	return nil, nil, nil
 }
 func (stubBlockProcessor) ExecuteBlock(context.Context, *ktypes.BlockExecRequest, bool) (*ktypes.BlockExecResult, error) {

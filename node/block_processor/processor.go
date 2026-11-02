@@ -290,6 +290,18 @@ func (bp *BlockProcessor) checkTx(ctx context.Context, readTx sql.Tx, ntx *types
 			bp.log.Debug("Failed to verify the transaction", "err", err)
 			return fmt.Errorf("failed to verify the transaction: %w", err)
 		}
+	} else {
+		// Context-bound auth (e.g. token expiry) can stop being valid as
+		// blocks advance, so it has to be re-verified on recheck.
+		requiresContext, err := authExt.RequiresContext(tx.Signature.Type)
+		if err != nil {
+			return fmt.Errorf("failed to verify the transaction: %w", err)
+		}
+		if requiresContext {
+			if err := verifyTransactionWithContext(authExt.VerifyContext{BlockContext: blockCtx}, tx); err != nil {
+				return fmt.Errorf("failed to verify the transaction: %w", err)
+			}
+		}
 	}
 
 	ident, err := authExt.GetIdentifier(tx.Signature.Type, tx.Sender)
@@ -454,9 +466,22 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 		if err != nil {
 			return nil, fmt.Errorf("failed to inspect block tx authenticator: %w", err)
 		}
+		txHash := txHashes[i]
+
 		if requiresContext {
+			// Context-bound auth depends on the block (e.g. an expiry checked
+			// against the block time), so a tx admitted to the mempool can be
+			// invalid by the time it is proposed. Fail the tx, not the block:
+			// aborting here lets one tx halt the chain (IDOS-38). The tx is
+			// not executed, so no nonce or fee is consumed.
 			if err := verifyTransactionWithContext(authExt.VerifyContext{BlockContext: blockCtx}, tx); err != nil {
-				return nil, fmt.Errorf("failed to verify block tx: %w", err)
+				bp.updateBlockExecutionStatus(txHash)
+				txResults[i] = ktypes.TxResult{
+					Code: uint32(ktypes.CodeInvalidSignature),
+					Log:  "ERROR: failed to verify block tx: " + err.Error(),
+				}
+				bp.log.Info("failed transaction", "tx", txHash, "err", err)
+				continue
 			}
 		}
 
@@ -464,8 +489,6 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 		if err != nil {
 			return nil, fmt.Errorf("failed to get identifier for the block tx: %w", err)
 		}
-
-		txHash := txHashes[i]
 
 		txCtx := &common.TxContext{
 			Ctx:           ctx,
@@ -814,8 +837,10 @@ func (bp *BlockProcessor) Commit(ctx context.Context, req *ktypes.CommitRequest)
 // This function enforces proper nonce ordering, validates transactions, and ensures
 // that consensus limits such as the maximum block size, maxVotesPerTx are met. It also adds
 // validator vote transactions for events observed by the leader. This function is
-// used exclusively by the leader node to prepare the proposal block.
-func (bp *BlockProcessor) PrepareProposal(ctx context.Context, txs []*types.Tx) (finalTxs []*ktypes.Transaction, invalidTxs []*ktypes.Transaction, err error) {
+// used exclusively by the leader node to prepare the proposal block. blockTime
+// is the timestamp the proposal will carry; context-bound auth is checked
+// against it.
+func (bp *BlockProcessor) PrepareProposal(ctx context.Context, txs []*types.Tx, blockTime time.Time) (finalTxs []*ktypes.Transaction, invalidTxs []*ktypes.Transaction, err error) {
 	// Use a reserved read transaction for any DB access, to prevent contention
 	// with rpc requests and other non-consensus operations.
 	readTx, err := bp.db.BeginReservedReadTx(ctx)
@@ -824,7 +849,7 @@ func (bp *BlockProcessor) PrepareProposal(ctx context.Context, txs []*types.Tx) 
 	}
 
 	defer readTx.Rollback(ctx)
-	return bp.prepareBlockTransactions(ctx, readTx, txs)
+	return bp.prepareBlockTransactions(ctx, readTx, txs, blockTime)
 }
 
 var (
