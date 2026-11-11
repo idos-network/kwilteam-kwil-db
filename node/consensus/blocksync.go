@@ -122,9 +122,13 @@ SYNC:
 
 			if errors.Is(err, types.ErrBlkNotFound) || errors.Is(err, types.ErrNotFound) {
 				// Recheck all mempool transactions to remove any that are no longer valid
-				// This handles the case where we might be orphaned with stale transactions
+				// This handles the case where we might be orphaned with stale transactions.
+				// Hold mempoolMtx like the other recheck callers, so QueueTx can't
+				// store a tx that is still unchecked while the recheck runs.
+				ce.mempoolMtx.PriorityLock()
 				lh, t := ce.lastBlockInternal()
 				ce.blockProcessor.RecheckTxs(ctx, lh, t)
+				ce.mempoolMtx.Unlock()
 				break SYNC // no peers have this block, assume block sync is complete, continue with consensus
 			}
 

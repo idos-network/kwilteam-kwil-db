@@ -2,6 +2,7 @@ package mempool
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 
@@ -212,6 +213,18 @@ func (mp *Mempool) PeekN(n, szLimit int) []*types.Tx {
 // CheckFn is a function type for validating transactions.
 type CheckFn func(ctx context.Context, tx *types.Tx) error
 
+// safeCheck runs fn and turns a panic into an error, so a tx that makes the
+// check panic is evicted instead of crashing the node. The block processor's
+// check function also recovers and logs; this is the fallback for any CheckFn.
+func safeCheck(ctx context.Context, tx *types.Tx, fn CheckFn) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic while rechecking tx %s: %v", tx.Hash(), r)
+		}
+	}()
+	return fn(ctx, tx)
+}
+
 // RecheckTxs validates all transactions in the mempool using the provided check
 // function, removing any that fail validation. This function will check the
 // transaction queue in order.
@@ -235,7 +248,7 @@ func (mp *Mempool) RecheckTxs(ctx context.Context, fn CheckFn) {
 			continue
 		}
 
-		if err := fn(ctx, tx); err != nil {
+		if err := safeCheck(ctx, tx, fn); err != nil {
 			toRemove = append(toRemove, indexedTx{idx: idx, txid: tx.Hash()})
 		}
 	}

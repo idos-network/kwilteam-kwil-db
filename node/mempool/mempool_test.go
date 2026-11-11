@@ -384,6 +384,36 @@ func TestMempool_RecheckTxs(t *testing.T) {
 		assert.Equal(t, 0, size)
 		assert.Equal(t, 0, count)
 	})
+
+	// IDOS-124: a check that panics must evict that tx, not crash the node.
+	t.Run("recheck evicts a transaction whose check panics", func(t *testing.T) {
+		mp := New(mempoolSz, maxTxSz)
+		tx1 := newTx(1, "A")
+		tx2 := newTx(2, "B")
+		tx3 := newTx(3, "C")
+
+		mp.Store(tx1)
+		mp.Store(tx2)
+		mp.Store(tx3)
+
+		checkFn := func(ctx context.Context, tx *types.Tx) error {
+			if string(tx.Sender) == "B" {
+				panic("check panicked") // e.g. a nil transfer amount
+			}
+			return nil
+		}
+
+		require.NotPanics(t, func() { mp.RecheckTxs(context.Background(), checkFn) })
+
+		_, count := mp.Size()
+		assert.Equal(t, 2, count)
+		_, exists := mp.txns[tx2.Hash()]
+		assert.False(t, exists)
+		_, exists = mp.txns[tx1.Hash()]
+		assert.True(t, exists)
+		_, exists = mp.txns[tx3.Hash()]
+		assert.True(t, exists)
+	})
 }
 
 func TestMempool_PeekN(t *testing.T) {
