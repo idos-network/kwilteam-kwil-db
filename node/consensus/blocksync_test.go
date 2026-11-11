@@ -162,10 +162,22 @@ func TestReplayBlockFromNetwork_RecheckHoldsMempoolLock(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- ce.replayBlockFromNetwork(ctx) }()
 
-	select {
-	case <-recheckCalled:
-		t.Fatal("RecheckTxs ran while mempoolMtx was held")
-	case <-time.After(200 * time.Millisecond):
+	// Wait until the replay is queued on mempoolMtx. If the recheck runs
+	// first, it didn't take the lock.
+	queued := func() bool {
+		ce.mempoolMtx.mtx.Lock()
+		defer ce.mempoolMtx.mtx.Unlock()
+		return len(ce.mempoolMtx.queue) > 0
+	}
+	deadline := time.After(5 * time.Second)
+	for !queued() {
+		select {
+		case <-recheckCalled:
+			t.Fatal("RecheckTxs ran while mempoolMtx was held")
+		case <-deadline:
+			t.Fatal("replay never waited for mempoolMtx")
+		case <-time.After(time.Millisecond):
+		}
 	}
 
 	ce.mempoolMtx.Unlock()
@@ -177,9 +189,18 @@ func TestReplayBlockFromNetwork_RecheckHoldsMempoolLock(t *testing.T) {
 	}
 	require.NoError(t, <-done)
 
-	// The lock must be released again after the recheck.
-	ce.mempoolMtx.Lock()
-	ce.mempoolMtx.Unlock()
+	// The recheck must release the lock again.
+	acquired := make(chan struct{})
+	go func() {
+		ce.mempoolMtx.Lock()
+		close(acquired)
+		ce.mempoolMtx.Unlock()
+	}()
+	select {
+	case <-acquired:
+	case <-time.After(5 * time.Second):
+		t.Fatal("mempoolMtx was not released after the recheck")
+	}
 }
 
 // Test that with stale transactions in mempool, they get removed by RecheckTxs

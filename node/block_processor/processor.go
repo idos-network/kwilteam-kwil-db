@@ -331,7 +331,14 @@ func (bp *BlockProcessor) RecheckTxs(ctx context.Context, height int64, timestam
 	}
 	defer readTx.Rollback(ctx)
 
-	bp.mempool.RecheckTxs(ctx, func(ctx context.Context, tx *types.Tx) error {
+	bp.mempool.RecheckTxs(ctx, func(ctx context.Context, tx *types.Tx) (err error) {
+		// A panicking check evicts the tx instead of crashing the node (IDOS-124).
+		defer func() {
+			if r := recover(); r != nil {
+				bp.log.Error("Panic while rechecking mempool tx, evicting it", "tx", tx.Hash(), "panic", r)
+				err = fmt.Errorf("panic while rechecking tx: %v", r)
+			}
+		}()
 		return bp.checkTx(ctx, readTx, tx, height, timestamp, true)
 	})
 

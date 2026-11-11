@@ -214,8 +214,8 @@ func (mp *Mempool) PeekN(n, szLimit int) []*types.Tx {
 type CheckFn func(ctx context.Context, tx *types.Tx) error
 
 // safeCheck runs fn and turns a panic into an error, so a tx that makes the
-// check panic is evicted instead of crashing the node. Admission (QueueTx)
-// already recovers the same way; the recheck runs on the consensus goroutine.
+// check panic is evicted instead of crashing the node. The block processor's
+// check function also recovers and logs; this is the fallback for any CheckFn.
 func safeCheck(ctx context.Context, tx *types.Tx, fn CheckFn) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
