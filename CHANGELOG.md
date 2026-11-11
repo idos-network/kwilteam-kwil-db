@@ -26,6 +26,21 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
+## 0.11.1 - 2026-11-12
+
+Mempool only. Block execution and the app hash don't change, so validators can
+upgrade one at a time.
+
+### Security
+
+- The mempool rejects a `transfer` without an amount (`ErrInvalidAmount`).
+  Before, such a transaction could panic the node during mempool recheck.
+  (IDOS-124, #44)
+- A panic while rechecking a mempool transaction evicts that transaction and is
+  logged instead of crashing the node. (#44)
+- The recheck at the end of block sync holds the mempool lock, like the other
+  recheck callers, so no unchecked transaction is queued while it runs. (#44)
+
 ## 0.11.0 - 2026-11-03
 
 Validators must upgrade together. Several of these changes affect how proposals
