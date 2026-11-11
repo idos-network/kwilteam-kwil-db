@@ -296,6 +296,10 @@ func (m *mempool) applyTransaction(ctx *common.TxContext, tx *types.Transaction,
 		}
 
 		amt := transfer.Amount
+		// The encoding allows a nil amount, so reject it here before using it.
+		if amt == nil {
+			return errors.Join(types.ErrInvalidAmount, errors.New("transfer amount is required"))
+		}
 		if amt.Cmp(&big.Int{}) < 0 {
 			return errors.Join(types.ErrInvalidAmount, errors.New("negative transfer not permitted"))
 		}

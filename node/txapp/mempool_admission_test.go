@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/trufnetwork/kwil-db/common"
+	"github.com/trufnetwork/kwil-db/core/crypto"
 	"github.com/trufnetwork/kwil-db/core/log"
 	"github.com/trufnetwork/kwil-db/core/types"
 	"github.com/trufnetwork/kwil-db/extensions/precompiles"
@@ -143,4 +144,49 @@ func Test_MempoolAdmissionWithoutEngine(t *testing.T) {
 
 	tx := admissionTx(t, &types.RawStatement{Statement: "SELECT 1;"})
 	require.NoError(t, m.applyTransaction(txCtx, tx, &mockDb{}, &mockRebroadcast{}))
+}
+
+// IDOS-124: a transfer whose amount decodes as nil must be rejected, not
+// dereferenced. Admission is skipped for the owner, so cover both callers and
+// a node without admission.
+func Test_MempoolRejectsNilTransferAmount(t *testing.T) {
+	engine := &mockAdmissionEngine{owner: "owner"}
+	transfer := &types.Transfer{To: &types.AccountID{Identifier: []byte("B"), KeyType: crypto.KeyTypeSecp256k1}} // Amount nil
+
+	tests := []struct {
+		name   string
+		caller string
+		engine admissionEngine
+	}{
+		{"user", "user", engine},
+		{"owner", "owner", engine},
+		{"no admission engine", "user", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &mempool{
+				accounts:   make(map[string]*types.Account),
+				accountMgr: &mockAccount{},
+				engine:     tt.engine,
+				log:        log.DiscardLogger,
+			}
+			txCtx := &common.TxContext{
+				Ctx:    context.Background(),
+				Caller: tt.caller,
+				BlockContext: &common.BlockContext{
+					ChainContext: &common.ChainContext{
+						NetworkParameters: &types.NetworkParameters{DisabledGasCosts: true},
+					},
+				},
+			}
+
+			tx := admissionTx(t, transfer)
+			var err error
+			require.NotPanics(t, func() {
+				err = m.applyTransaction(txCtx, tx, &mockDb{}, &mockRebroadcast{})
+			})
+			require.ErrorIs(t, err, types.ErrInvalidAmount)
+		})
+	}
 }

@@ -127,6 +127,61 @@ func TestReplayBlockFromNetwork_CallsRecheckTxsOnErrNotFound(t *testing.T) {
 	require.True(t, recheckCalled, "RecheckTxs should be called when ErrNotFound occurs")
 }
 
+// IDOS-124: the end-of-sync recheck must hold mempoolMtx, like the other
+// recheck callers, so it can't run while QueueTx has stored a tx that is
+// still unchecked.
+func TestReplayBlockFromNetwork_RecheckHoldsMempoolLock(t *testing.T) {
+	ctx := context.Background()
+
+	recheckCalled := make(chan struct{})
+	ce := &ConsensusEngine{
+		mempool: mempool.New(1000000, 100000),
+		blockProcessor: &testBlockProcessor{
+			recheckTxsFunc: func(ctx context.Context, height int64, timestamp time.Time) error {
+				close(recheckCalled)
+				return nil
+			},
+		},
+		log: log.DiscardLogger,
+	}
+
+	now := time.Now()
+	ce.state.lc = &lastCommit{
+		blk:    &ktypes.Block{Header: &ktypes.BlockHeader{Height: 1, Timestamp: now}},
+		height: 1,
+	}
+	ce.stateInfo.lastCommit.blk = ce.state.lc.blk
+	ce.stateInfo.lastCommit.height = 1
+	ce.blkRequester = func(ctx context.Context, height int64) (types.Hash, []byte, *ktypes.CommitInfo, int64, error) {
+		return types.Hash{}, nil, nil, 0, types.ErrBlkNotFound
+	}
+
+	// Stand in for a QueueTx call between Store and CheckTx.
+	ce.mempoolMtx.Lock()
+
+	done := make(chan error, 1)
+	go func() { done <- ce.replayBlockFromNetwork(ctx) }()
+
+	select {
+	case <-recheckCalled:
+		t.Fatal("RecheckTxs ran while mempoolMtx was held")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	ce.mempoolMtx.Unlock()
+
+	select {
+	case <-recheckCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RecheckTxs did not run after mempoolMtx was released")
+	}
+	require.NoError(t, <-done)
+
+	// The lock must be released again after the recheck.
+	ce.mempoolMtx.Lock()
+	ce.mempoolMtx.Unlock()
+}
+
 // Test that with stale transactions in mempool, they get removed by RecheckTxs
 func TestReplayBlockFromNetwork_RemovesStaleTransactions(t *testing.T) {
 	ctx := context.Background()
