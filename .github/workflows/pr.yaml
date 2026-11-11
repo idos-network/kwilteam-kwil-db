@@ -149,10 +149,17 @@ jobs:
           task build:kwild
           task build:cli
 
+      # Use the daemon's own builder. Since runner image 20261028, RUN steps in
+      # a docker-container (BuildKit) builder can't resolve DNS, so apt fails;
+      # the docker driver builds like `task pg:image` above, which works.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         id: buildx
+        with:
+          driver: docker
 
+      # No GHA layer cache: the docker driver can't export it. The image is
+      # apt install plus two copied binaries.
       - name: Build kwild image
         uses: docker/build-push-action@v6
         with:
@@ -162,8 +169,6 @@ jobs:
           file: ./contrib/docker/kwild.ci.dockerfile
           push: false
           tags: kwild:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Run acceptance test
         run: |
