@@ -134,15 +134,21 @@ func TestReplayBlockFromNetwork_RecheckHoldsMempoolLock(t *testing.T) {
 	ctx := context.Background()
 
 	recheckCalled := make(chan struct{})
+	var heldDuringRecheck bool
 	ce := &ConsensusEngine{
 		mempool: mempool.New(1000000, 100000),
-		blockProcessor: &testBlockProcessor{
-			recheckTxsFunc: func(ctx context.Context, height int64, timestamp time.Time) error {
-				close(recheckCalled)
-				return nil
-			},
+		log:     log.DiscardLogger,
+	}
+	ce.blockProcessor = &testBlockProcessor{
+		recheckTxsFunc: func(ctx context.Context, height int64, timestamp time.Time) error {
+			// The test released mempoolMtx before this runs, so an active
+			// lock here can only be the replay's own.
+			ce.mempoolMtx.mtx.Lock()
+			heldDuringRecheck = ce.mempoolMtx.active
+			ce.mempoolMtx.mtx.Unlock()
+			close(recheckCalled)
+			return nil
 		},
-		log: log.DiscardLogger,
 	}
 
 	now := time.Now()
@@ -188,6 +194,7 @@ func TestReplayBlockFromNetwork_RecheckHoldsMempoolLock(t *testing.T) {
 		t.Fatal("RecheckTxs did not run after mempoolMtx was released")
 	}
 	require.NoError(t, <-done)
+	require.True(t, heldDuringRecheck, "mempoolMtx was not held during RecheckTxs")
 
 	// The recheck must release the lock again.
 	acquired := make(chan struct{})
