@@ -43,6 +43,13 @@ taken after the upgrade.
   `CodeInvalidSignature` and isn't executed; the rest of the block still runs. A
   block transaction without a body fails the same way.
 
+### Fixed
+
+- Block validation rejects a block that contains a transaction without a body
+  with an error, before reading any transaction field. Before, `validateBlock`
+  dereferenced the missing body. After such a rejection the node still accepts
+  the next block announced or synced for that height.
+
 ## 0.11.1 - 2026-11-12
 
 Mempool only. Block execution and the app hash don't change, so validators can

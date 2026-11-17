@@ -402,11 +402,15 @@ func (ce *ConsensusEngine) processAndCommit(ctx context.Context, blk *ktypes.Blo
 	}
 
 	if err := ce.validateBlock(blk); err != nil {
+		// Nothing was executed: clear the guard so that the honest block for
+		// this height (announced or synced later) is not taken as a duplicate.
+		ce.stateInfo.hasBlock.Store(ce.state.lc.height)
 		return err
 	}
 
 	// ensure that the commit info is valid
 	if err := ce.acceptCommitInfo(ci, blkID); err != nil {
+		ce.stateInfo.hasBlock.Store(ce.state.lc.height)
 		return fmt.Errorf("error validating commitInfo: %w", err)
 	}
 
