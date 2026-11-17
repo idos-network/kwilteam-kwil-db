@@ -462,34 +462,31 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 		if tx == nil || tx.Signature == nil {
 			return nil, errors.New("transaction signature is required")
 		}
-		// Non-context authenticators are not re-verified here. Reject a
-		// non-canonical type anyway so @authenticator cannot diverge from
+		// Reject a non-canonical type so @authenticator cannot diverge from
 		// the registered name.
 		if err := authExt.ValidateCanonicalAuthType(tx.Signature.Type); err != nil {
 			return nil, fmt.Errorf("failed to verify block tx: %w", err)
 		}
 
-		requiresContext, err := authExt.RequiresContext(tx.Signature.Type)
-		if err != nil {
-			return nil, fmt.Errorf("failed to inspect block tx authenticator: %w", err)
-		}
 		txHash := txHashes[i]
 
-		if requiresContext {
-			// Context-bound auth depends on the block (e.g. an expiry checked
-			// against the block time), so a tx admitted to the mempool can be
-			// invalid by the time it is proposed. Fail the tx, not the block:
-			// aborting here lets one tx halt the chain (IDOS-38). The tx is
-			// not executed, so no nonce or fee is consumed.
-			if err := verifyTransactionWithContext(authExt.VerifyContext{BlockContext: blockCtx}, tx); err != nil {
-				bp.updateBlockExecutionStatus(txHash)
-				txResults[i] = ktypes.TxResult{
-					Code: uint32(ktypes.CodeInvalidSignature),
-					Log:  "ERROR: failed to verify block tx: " + err.Error(),
-				}
-				bp.log.Info("failed transaction", "tx", txHash, "err", err)
-				continue
+		// Every node verifies every signature itself instead of relying on
+		// the mempool check of the node that admitted the tx. Valid txs
+		// pass: the mempool admits them with this same check.
+		//
+		// Context-bound auth depends on the block (e.g. an expiry checked
+		// against the block time), so a tx admitted to the mempool can be
+		// invalid by the time it is proposed. Fail the tx, not the block:
+		// aborting here lets one tx halt the chain (IDOS-38). The tx is not
+		// executed, so no nonce or fee is consumed.
+		if err := verifyTransactionWithContext(authExt.VerifyContext{BlockContext: blockCtx}, tx); err != nil {
+			bp.updateBlockExecutionStatus(txHash)
+			txResults[i] = ktypes.TxResult{
+				Code: uint32(ktypes.CodeInvalidSignature),
+				Log:  "ERROR: failed to verify block tx: " + err.Error(),
 			}
+			bp.log.Info("failed transaction", "tx", txHash, "err", err)
+			continue
 		}
 
 		identifier, err := authExt.GetIdentifier(tx.Signature.Type, tx.Sender)
