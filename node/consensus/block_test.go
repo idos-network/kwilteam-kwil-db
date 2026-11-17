@@ -147,3 +147,97 @@ func TestProcessBlockProposalNacksTimestampNotAfterPrevious(t *testing.T) {
 		t.Fatal("expected an invalid-block Nack")
 	}
 }
+
+// bodylessParamsProcessor allows non-empty blocks, so validateBlock gets past
+// the block size check that the zero-valued stub params would trip.
+type bodylessParamsProcessor struct{ stubBlockProcessor }
+
+var bodylessTestParams = &ktypes.NetworkParameters{MaxBlockSize: 1 << 20, MaxVotesPerTx: 100}
+
+func (bodylessParamsProcessor) ConsensusParams() *ktypes.NetworkParameters {
+	return bodylessTestParams
+}
+
+// bodylessTxBlock returns the next block (height 4) for ce with one
+// transaction whose body bytes are empty, decoded the way a peer's block is.
+// It is otherwise valid: correct merkle root, prev hashes and param hashes.
+func bodylessTxBlock(t *testing.T, ce *ConsensusEngine) (*ktypes.Block, []byte) {
+	t.Helper()
+	tx := &ktypes.Transaction{Serialization: ktypes.SignedMsgDirect}
+	blk := ktypes.NewBlock(4, ce.state.lc.blkHash, ce.state.lc.appHash, ce.validatorSetHash(),
+		ce.ConsensusParams().Hash(), time.Now(), []*ktypes.Transaction{tx})
+	raw := blk.Bytes()
+	decoded, err := ktypes.DecodeBlock(raw)
+	require.NoError(t, err, "DecodeBlock accepts a body-less transaction")
+	require.Nil(t, decoded.Txns[0].Body)
+	return decoded, raw
+}
+
+func bodylessTestEngine(t *testing.T) (*ConsensusEngine, crypto.PrivateKey, chan *types.AckRes) {
+	t.Helper()
+	ce, leaderKey, acks := proposalTestEngine(t, time.Now().Add(-time.Second))
+	ce.blockProcessor = bodylessParamsProcessor{}
+	return ce, leaderKey, acks
+}
+
+// A body-less transaction must fail validation.
+func TestValidateBlockRejectsBodylessTx(t *testing.T) {
+	ce, _, _ := bodylessTestEngine(t)
+	blk, _ := bodylessTxBlock(t, ce)
+
+	err := ce.validateBlock(blk)
+	require.ErrorContains(t, err, "transaction 0 in block has no body")
+}
+
+// A leader-signed proposal with a body-less transaction gets an invalid-block
+// Nack.
+func TestProcessBlockProposalNacksBodylessTx(t *testing.T) {
+	ce, leaderKey, acks := bodylessTestEngine(t)
+	blk, _ := bodylessTxBlock(t, ce)
+	require.NoError(t, blk.Sign(leaderKey))
+	prop := &blockProposal{height: 4, blkHash: blk.Hash(), blk: blk, done: func() {}}
+
+	err := ce.processBlockProposal(context.Background(), prop)
+	require.ErrorContains(t, err, "has no body")
+	require.Nil(t, ce.state.blkProp)
+
+	select {
+	case ack := <-acks:
+		require.False(t, ack.ACK)
+		require.Equal(t, types.NackStatusInvalidBlock, *ack.NackStatus)
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected an invalid-block Nack")
+	}
+}
+
+// A block announcement (commitBlock) with a body-less transaction must return
+// an error and leave the hasBlock guard at the last committed height, so the
+// next block for that height is not dropped as a "duplicate block
+// announcement".
+func TestBlockAnnouncementRejectsBodylessTx(t *testing.T) {
+	ce, _, _ := bodylessTestEngine(t)
+	blk, _ := bodylessTxBlock(t, ce)
+	ci := &ktypes.CommitInfo{AppHash: types.Hash{1}} // no votes
+
+	ce.role.Store(types.RoleSentry)
+	ce.stateInfo.hasBlock.Store(ce.state.lc.height)
+	err := ce.commitBlock(context.Background(), blk, ci, blk.Hash(), func() {})
+	require.ErrorContains(t, err, "has no body")
+	require.Equal(t, ce.state.lc.height, ce.stateInfo.hasBlock.Load())
+}
+
+// Block sync (applyBlock) decodes the raw block from a peer and must return
+// an error and leave the hasBlock guard unchanged. The sync loop
+// (replayBlockFromNetwork) still treats that error as fatal, like any other
+// invalid served block.
+func TestBlockSyncRejectsBodylessTx(t *testing.T) {
+	ce, _, _ := bodylessTestEngine(t)
+	blk, raw := bodylessTxBlock(t, ce)
+	ci := &ktypes.CommitInfo{AppHash: types.Hash{1}} // no votes
+
+	ce.role.Store(types.RoleValidator)
+	ce.stateInfo.hasBlock.Store(ce.state.lc.height)
+	err := ce.applyBlock(context.Background(), raw, ci, blk.Hash())
+	require.ErrorContains(t, err, "has no body")
+	require.Equal(t, ce.state.lc.height, ce.stateInfo.hasBlock.Load())
+}

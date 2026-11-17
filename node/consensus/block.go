@@ -33,6 +33,17 @@ func (ce *ConsensusEngine) validateBlock(blk *ktypes.Block) error {
 		return fmt.Errorf("transaction count mismatch, expected %d, got %d", blk.Header.NumTxns, len(blk.Txns))
 	}
 
+	// A transaction serialized with empty body bytes decodes with a nil Body
+	// (see Transaction.deserialize), and DecodeBlock accepts it. Reject such
+	// blocks before anything below reads txn.Body. Honest leaders never
+	// include them, since CheckTx and PrepareProposal drop body-less
+	// transactions.
+	for i, txn := range blk.Txns {
+		if txn == nil || txn.Body == nil {
+			return fmt.Errorf("transaction %d in block has no body", i)
+		}
+	}
+
 	// Verify the merkle root of the block transactions
 	merkleRoot := blk.CalcMerkleRoot() // NOTE: this expects CalcMerkleRoot to use tx.HashCache() to prepare the Transaction's internal hash cache
 	if merkleRoot != blk.Header.MerkleRoot {
