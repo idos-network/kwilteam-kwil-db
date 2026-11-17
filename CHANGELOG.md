@@ -26,6 +26,8 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
+## 0.12.0 - 2026-11-17
+
 Block execution changes for transactions with an invalid signature only.
 Blocks without such a transaction give the same results on both versions, so
 validators can upgrade one at a time. While versions are mixed, a block that
@@ -41,14 +43,14 @@ taken after the upgrade.
   only context-bound ones, instead of relying on the mempool check of the node
   that admitted it. A transaction whose signature doesn't verify fails with
   `CodeInvalidSignature` and isn't executed; the rest of the block still runs. A
-  block transaction without a body fails the same way.
+  block transaction without a body fails the same way. (#46)
 
 ### Fixed
 
 - Block validation rejects a block that contains a transaction without a body
   with an error, before reading any transaction field. Before, `validateBlock`
   dereferenced the missing body. After such a rejection the node still accepts
-  the next block announced or synced for that height.
+  the next block announced or synced for that height. (#47)
 
 ## 0.11.1 - 2026-11-12
 
