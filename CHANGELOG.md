@@ -26,10 +26,14 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
-Block execution changes for transactions with an invalid signature only. Honest
-blocks give the same results, so validators can upgrade one at a time. A node
-replaying blocks from before the upgrade can fail a transaction that was
-executed then; start new nodes from a snapshot taken after the upgrade.
+Block execution changes for transactions with an invalid signature only.
+Blocks without such a transaction give the same results on both versions, so
+validators can upgrade one at a time. While versions are mixed, a block that
+contains a transaction with an invalid signature gives a different app hash on
+upgraded and older validators, and upgraded validators can halt. Keep the
+mixed-version window short. A node replaying blocks from before the upgrade can
+fail a transaction that was executed then; start new nodes from a snapshot
+taken after the upgrade.
 
 ### Changed
 
