@@ -26,6 +26,19 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
+Block execution changes for transactions with an invalid signature only. Honest
+blocks give the same results, so validators can upgrade one at a time. A node
+replaying blocks from before the upgrade can fail a transaction that was
+executed then; start new nodes from a snapshot taken after the upgrade.
+
+### Changed
+
+- Block execution verifies the signature of every transaction in a block, not
+  only context-bound ones, instead of relying on the mempool check of the node
+  that admitted it. A transaction whose signature doesn't verify fails with
+  `CodeInvalidSignature` and isn't executed; the rest of the block still runs. A
+  block transaction without a body fails the same way.
+
 ## 0.11.1 - 2026-11-12
 
 Mempool only. Block execution and the app hash don't change, so validators can

@@ -491,6 +491,10 @@ func verifyTransactionWithContext(verifyCtx authExt.VerifyContext, tx *types.Tra
 	if err := authExt.ValidateCanonicalAuthType(tx.Signature.Type); err != nil {
 		return err
 	}
+	// SerializeMsg dereferences the body, and a decoded block tx can lack one.
+	if tx.Body == nil {
+		return errors.New("transaction body is required")
+	}
 
 	msg, err := tx.SerializeMsg()
 	if err != nil {
