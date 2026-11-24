@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,18 +28,29 @@ func TestSQLCommand(t *testing.T) {
 	}
 }
 
-// TestBoundedView records through the package's instruments, which use the
-// global meter provider, and checks that per-block and per-error values don't
-// create new attribute sets.
-func TestBoundedView(t *testing.T) {
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader), sdkmetric.WithView(boundedView))
-	prev := otel.GetMeterProvider()
-	otel.SetMeterProvider(mp)
-	t.Cleanup(func() {
-		otel.SetMeterProvider(prev)
-		_ = mp.Shutdown(context.Background())
+// testReader is the reader of the meter provider the package's instruments
+// record to. The instruments are created in init() through the global otel
+// meter provider, which delegates them to the first provider set and never to
+// a later one, so the provider is set once per process (go test -count=N runs
+// the test N times in one process).
+var (
+	testReaderOnce sync.Once
+	testReader     *sdkmetric.ManualReader
+)
+
+func boundedViewReader() *sdkmetric.ManualReader {
+	testReaderOnce.Do(func() {
+		testReader = sdkmetric.NewManualReader()
+		otel.SetMeterProvider(sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(testReader), sdkmetric.WithView(boundedView)))
 	})
+	return testReader
+}
+
+// TestBoundedView records through the package's instruments and checks that
+// per-block and per-error values don't create new attribute sets.
+func TestBoundedView(t *testing.T) {
+	reader := boundedViewReader()
 
 	ctx := context.Background()
 	for h := int64(1); h <= 50; h++ {
@@ -52,6 +64,10 @@ func TestBoundedView(t *testing.T) {
 	RPC.RecordRequest(ctx, "user.call", 0, time.Millisecond)
 	RPC.RecordRequest(ctx, "user.call", -32001, time.Millisecond)
 	Node.BlacklistOperation(ctx, "add", "manual", true)
+	Node.BlacklistOperation(ctx, "add", "incident 1", true)
+	Node.BlacklistOperation(ctx, "add", "incident 2", true)
+	Node.BlockedConnection(ctx, "inbound", "incident 1")
+	Node.BlockedConnection(ctx, "inbound", "connection_exhaustion")
 
 	var rm metricdata.ResourceMetrics
 	require.NoError(t, reader.Collect(ctx, &rm))
@@ -98,8 +114,20 @@ func TestBoundedView(t *testing.T) {
 	require.Equal(t, "UNKNOWN", v.AsString())
 
 	require.Len(t, attrSets["requests.total"], 2) // status 0 and -32001
-	require.Len(t, attrSets["node.blacklist.operations.count"], 1)
+	// "manual" and "custom" (free-text reasons from the admin service).
+	require.Len(t, attrSets["node.blacklist.operations.count"], 2)
 	require.Equal(t, 3, attrSets["node.blacklist.operations.count"][0].Len())
+	require.ElementsMatch(t, []string{"manual", "custom"}, reasons(attrSets["node.blacklist.operations.count"]))
+	require.ElementsMatch(t, []string{"custom", "connection_exhaustion"}, reasons(attrSets["node.blacklist.connections_blocked.count"]))
 
 	require.Equal(t, latencyBucketsMS, queryBounds)
+}
+
+func reasons(sets []attribute.Set) []string {
+	var out []string
+	for _, s := range sets {
+		v, _ := s.Value("reason")
+		out = append(out, v.AsString())
+	}
+	return out
 }

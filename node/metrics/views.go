@@ -24,7 +24,7 @@ var allowedAttributes = map[attribute.Key]struct{}{
 	"type":      {}, // SQL command (SELECT, INSERT, ...), see sqlCommand
 	"proto":     {}, // p2p protocol id
 	"operation": {}, // blacklist add / remove
-	"reason":    {}, // blacklist reason
+	"reason":    {}, // blacklist reason, see blacklistReason
 	"permanent": {}, // blacklist entry is permanent
 	"direction": {}, // inbound / outbound
 }
@@ -62,4 +62,18 @@ func sqlCommand(tag string) string {
 		return "UNKNOWN"
 	}
 	return strings.ToUpper(cmd)
+}
+
+// blacklistReason keeps the reasons kwild itself sets and records any other
+// reason as "custom". An operator can blacklist a peer with free text through
+// the admin service, and the peer gate reports that text again for each
+// blocked connection; each distinct text would be a new attribute set. The
+// full reason stays in the blacklist and the logs.
+func blacklistReason(reason string) string {
+	switch reason {
+	case "manual", "connection_exhaustion":
+		return reason
+	default:
+		return "custom"
+	}
 }

@@ -39,7 +39,9 @@ and the app hash don't change, so validators can upgrade one at a time.
   `operation`, `reason`, `permanent`, `direction`) and drops the rest before
   aggregation. `query.latency` and `query.errors` record the SQL command
   (`INSERT`) instead of the full command tag with its row count (`INSERT 0 5`),
-  and `query.errors` no longer carries the error text.
+  and `query.errors` no longer carries the error text. Blacklist metrics record
+  a reason other than `manual` or `connection_exhaustion` (free text from the
+  admin service) as `custom`; the blacklist and the logs keep the full reason.
 - Latency histograms (milliseconds) use bounds from 0.5 ms to 30 s instead of
   the SDK default, which starts at 5 ms.
 

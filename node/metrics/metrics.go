@@ -261,7 +261,7 @@ func (nodeMetrics) BlacklistOperation(ctx context.Context, operation, reason str
 	blacklistOperationsCounter.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String("operation", operation), // "add" or "remove"
-			attribute.String("reason", reason),
+			attribute.String("reason", blacklistReason(reason)),
 			attribute.Bool("permanent", permanent),
 		),
 	)
@@ -287,7 +287,7 @@ func (nodeMetrics) BlockedConnection(ctx context.Context, direction, reason stri
 	blacklistConnectionsBlocked.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String("direction", direction), // "inbound" or "outbound"
-			attribute.String("reason", reason),
+			attribute.String("reason", blacklistReason(reason)),
 		),
 	)
 }
