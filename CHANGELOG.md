@@ -26,6 +26,30 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
+Telemetry only (`[telemetry] enable = true`, off by default). Block execution
+and the app hash don't change, so validators can upgrade one at a time.
+
+### Fixed
+
+- Metrics no longer grow with every block. The instruments recorded the block
+  height, block and payload sizes, latency, transaction count and error text as
+  attributes, and the SDK kept each new attribute set for the life of the
+  process and exported all of them on every interval. A view now keeps only
+  attributes with a fixed set of values (`method`, `status`, `type`, `proto`,
+  `operation`, `reason`, `permanent`, `direction`) and drops the rest before
+  aggregation. `query.latency` and `query.errors` record the SQL command
+  (`INSERT`) instead of the full command tag with its row count (`INSERT 0 5`),
+  and `query.errors` no longer carries the error text. Blacklist metrics record
+  a reason other than `manual` or `connection_exhaustion` (free text from the
+  admin service) as `custom`; the blacklist and the logs keep the full reason.
+- Latency histograms (milliseconds) use bounds from 0.5 ms to 30 s instead of
+  the SDK default, which starts at 5 ms.
+
+### Added
+
+- The telemetry resource reads `OTEL_SERVICE_NAME` and
+  `OTEL_RESOURCE_ATTRIBUTES`.
+
 ## 0.12.0 - 2026-11-17
 
 Block execution changes for transactions with an invalid signature only.
