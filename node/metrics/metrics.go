@@ -315,7 +315,7 @@ func (dbMetrics) ReleasedConnection(ctx context.Context) {
 func (dbMetrics) RecordQuery(ctx context.Context, crudType string, duration time.Duration) {
 	dbQueryLatencyHist.Record(ctx, 1000*duration.Seconds(),
 		metric.WithAttributes(
-			attribute.String("type", crudType),
+			attribute.String("type", sqlCommand(crudType)),
 		),
 	)
 }
@@ -323,8 +323,8 @@ func (dbMetrics) RecordQuery(ctx context.Context, crudType string, duration time
 func (dbMetrics) RecordQueryFailure(ctx context.Context, crudType string, err error) {
 	dbQueryErrorCount.Add(ctx, 1,
 		metric.WithAttributes(
-			attribute.String("type", crudType),
-			attribute.String("error", err.Error()),
+			attribute.String("type", sqlCommand(crudType)),
+			attribute.String("error", err.Error()), // dropped by boundedView
 		),
 	)
 }

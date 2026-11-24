@@ -56,6 +56,7 @@ func StartOTEL(ctx context.Context, options ...OTELOption) (func(context.Context
 	res, err := resource.New(context.Background(),
 		resource.WithAttributes(semconv.ServiceNameKey.String("kwil-db")), // i.e. service.name = kwil-db, but with a fancy package
 		resource.WithOS(), resource.WithProcess(), resource.WithHost(),
+		resource.WithFromEnv(), // idOS fork: OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
@@ -111,6 +112,7 @@ func StartOTEL(ctx context.Context, options ...OTELOption) (func(context.Context
 		metric.WithResource(res),
 		metric.WithReader(metric.NewPeriodicReader(metricExporter,
 			metric.WithInterval(opts.interval))), // Default is 1m.
+		metric.WithView(boundedView), // idOS fork: bounded attribute sets, see views.go
 	)
 
 	shutdownFuncs = append(shutdownFuncs, meterProvider.Shutdown)
