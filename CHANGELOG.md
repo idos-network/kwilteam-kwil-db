@@ -26,6 +26,8 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
+## 0.12.1 - 2026-11-25
+
 Telemetry only (`[telemetry] enable = true`, off by default). Block execution
 and the app hash don't change, so validators can upgrade one at a time.
 
@@ -41,14 +43,14 @@ and the app hash don't change, so validators can upgrade one at a time.
   (`INSERT`) instead of the full command tag with its row count (`INSERT 0 5`),
   and `query.errors` no longer carries the error text. Blacklist metrics record
   a reason other than `manual` or `connection_exhaustion` (free text from the
-  admin service) as `custom`; the blacklist and the logs keep the full reason.
+  admin service) as `custom`; the blacklist and the logs keep the full reason. (#49)
 - Latency histograms (milliseconds) use bounds from 0.5 ms to 30 s instead of
-  the SDK default, which starts at 5 ms.
+  the SDK default, which starts at 5 ms. (#49)
 
 ### Added
 
 - The telemetry resource reads `OTEL_SERVICE_NAME` and
-  `OTEL_RESOURCE_ATTRIBUTES`.
+  `OTEL_RESOURCE_ATTRIBUTES`. (#49)
 
 ## 0.12.0 - 2026-11-17
 
