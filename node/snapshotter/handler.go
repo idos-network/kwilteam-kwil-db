@@ -124,7 +124,7 @@ func (s *SnapshotStore) snapshotChunkRequestHandler(stream network.Stream) {
 		return
 	}
 
-	s.log.Info("starting chunk transmission", "chunk", req.Index, "height", req.Height,
+	s.log.Debug("starting chunk transmission", "chunk", req.Index, "height", req.Height,
 		"peer", peerID, "start_time", startTime.Format(time.RFC3339Nano))
 
 	// get the snapshot chunk file path for streaming
@@ -193,7 +193,7 @@ func (s *SnapshotStore) snapshotChunkRequestHandler(stream network.Stream) {
 	totalDuration := time.Since(startTime)
 	rate := float64(bytesWritten) / totalDuration.Seconds() / 1024 // KB/s
 
-	s.log.Info("successfully sent snapshot chunk", "chunk", req.Index, "height", req.Height,
+	s.log.Debug("successfully sent snapshot chunk", "chunk", req.Index, "height", req.Height,
 		"peer", peerID, "bytes_sent", bytesWritten, "file_size", fileSize,
 		"copy_duration", copyDuration, "total_duration", totalDuration, "rate_kbps", rate)
 }
@@ -212,7 +212,7 @@ func (s *SnapshotStore) snapshotChunkRangeRequestHandler(stream network.Stream) 
 		return
 	}
 
-	s.log.Info("starting range chunk transmission", "chunk", req.Index, "height", req.Height,
+	s.log.Debug("starting range chunk transmission", "chunk", req.Index, "height", req.Height,
 		"offset", req.Offset, "length", req.Length, "peer", peerID, "start_time", startTime.Format(time.RFC3339Nano),
 		"is_resume", req.Offset > 0)
 
@@ -308,7 +308,7 @@ func (s *SnapshotStore) snapshotChunkRangeRequestHandler(stream network.Stream) 
 	totalDuration := time.Since(startTime)
 	rate := float64(bytesWritten) / totalDuration.Seconds() / 1024 // KB/s
 
-	s.log.Info("successfully sent snapshot chunk range", "chunk", req.Index, "height", req.Height,
+	s.log.Debug("successfully sent snapshot chunk range", "chunk", req.Index, "height", req.Height,
 		"peer", peerID, "offset", req.Offset, "bytes_sent", bytesWritten, "requested_length", lengthToRead,
 		"copy_duration", copyDuration, "total_duration", totalDuration, "rate_kbps", rate, "is_resume", req.Offset > 0)
 }

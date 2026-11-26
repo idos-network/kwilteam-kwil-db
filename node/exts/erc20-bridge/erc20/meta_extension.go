@@ -1726,10 +1726,9 @@ func init() {
 			if !info.active {
 				return nil // skip inactive (e.g. unused) instances
 			}
-			// DEBUG: Log entry into end_block check
 			elapsedTime := block.Timestamp - info.currentEpoch.StartTime
 			if app.Service != nil && app.Service.Logger != nil {
-				app.Service.Logger.Infof("[ENDBLOCK] Instance %s: currentEpoch ID=%s, startHeight=%d, startTime=%d, distributionPeriod=%d, elapsed=%d",
+				app.Service.Logger.Debugf("[ENDBLOCK] Instance %s: currentEpoch ID=%s, startHeight=%d, startTime=%d, distributionPeriod=%d, elapsed=%d",
 					id, info.currentEpoch.ID, info.currentEpoch.StartHeight, info.currentEpoch.StartTime, info.userProvidedData.DistributionPeriod, elapsedTime)
 			}
 
@@ -1766,17 +1765,15 @@ func init() {
 				return err
 			}
 
-			// DEBUG: Log previous epoch check result
 			if app.Service != nil && app.Service.Logger != nil {
-				app.Service.Logger.Infof("[ENDBLOCK] Instance %s: Previous epoch check: exists=%v, confirmed=%v (endBlock=%d)",
+				app.Service.Logger.Debugf("[ENDBLOCK] Instance %s: Previous epoch check: exists=%v, confirmed=%v (endBlock=%d)",
 					id, preExists, preConfirmed, info.currentEpoch.StartHeight)
 			}
 
 			if !preExists || // first epoch should always be finalized
 				(preExists && preConfirmed) { // previous epoch exists and is confirmed
-				// DEBUG: Log before generating merkle tree
 				if app.Service != nil && app.Service.Logger != nil {
-					app.Service.Logger.Infof("[ENDBLOCK] Instance %s: Calling genMerkleTreeForEpoch with epoch ID=%s, escrow=%s",
+					app.Service.Logger.Debugf("[ENDBLOCK] Instance %s: Calling genMerkleTreeForEpoch with epoch ID=%s, escrow=%s",
 						id, info.currentEpoch.ID, info.EscrowAddress.Hex())
 				}
 
@@ -1786,14 +1783,13 @@ func init() {
 				}
 
 				if leafNum == 0 {
-					if app.Service != nil && app.Service.Logger != nil {
-						app.Service.Logger.Warnf("[ENDBLOCK] Instance %s: genMerkleTreeForEpoch returned 0 rewards for epoch ID=%s - delaying finalization",
-							id, info.currentEpoch.ID)
-					}
+					// Normal while nobody earns rewards; checked again every block.
+					logEndBlockStateOnce(app, id, "no-rewards:"+info.currentEpoch.ID.String(),
+						"[ENDBLOCK] Instance %s: no rewards in epoch ID=%s yet, delaying finalization",
+						id, info.currentEpoch.ID)
 					return nil
 				}
 
-				// DEBUG: Log successful merkle tree generation
 				if app.Service != nil && app.Service.Logger != nil {
 					app.Service.Logger.Infof("[ENDBLOCK] Instance %s: Generated merkle tree with %d leaves, total=%s, root=%x",
 						id, leafNum, total.String(), root)
@@ -1812,7 +1808,6 @@ func init() {
 				// create a new epoch
 				newEpoch := newPendingEpoch(id, block)
 
-				// DEBUG: Log new epoch creation
 				if app.Service != nil && app.Service.Logger != nil {
 					app.Service.Logger.Infof("[ENDBLOCK] Instance %s: Creating new epoch ID=%s, startHeight=%d, startTime=%d (old epoch ID=%s)",
 						id, newEpoch.ID, newEpoch.StartHeight, newEpoch.StartTime, info.currentEpoch.ID)
@@ -1836,10 +1831,9 @@ func init() {
 			}
 
 			// if previous epoch exists and not confirmed, we do nothing.
-			if app.Service != nil && app.Service.Logger != nil {
-				app.Service.Logger.Infof("[ENDBLOCK] Instance %s: Previous epoch not confirmed yet, skipping finalization (currentEpoch ID=%s)",
-					id, info.currentEpoch.ID)
-			}
+			logEndBlockStateOnce(app, id, "unconfirmed:"+info.currentEpoch.ID.String(),
+				"[ENDBLOCK] Instance %s: Previous epoch not confirmed yet, skipping finalization (currentEpoch ID=%s)",
+				id, info.currentEpoch.ID)
 			return nil
 		})
 		if err != nil {
@@ -1854,9 +1848,8 @@ func init() {
 				oldEpochID := info.currentEpoch.ID
 				info.currentEpoch = newEpoch
 
-				// DEBUG: Log epoch update in memory
 				if app.Service != nil && app.Service.Logger != nil {
-					app.Service.Logger.Infof("[ENDBLOCK] Instance %s: Updated in-memory currentEpoch: %s -> %s",
+					app.Service.Logger.Debugf("[ENDBLOCK] Instance %s: Updated in-memory currentEpoch: %s -> %s",
 						id, oldEpochID, newEpoch.ID)
 				}
 
@@ -1870,11 +1863,27 @@ func init() {
 	}
 }
 
+// endBlockLogState holds, per reward instance, the last epoch state end_block logged at info
+// level. States that last many blocks (no rewards yet, previous epoch not confirmed) are then
+// logged once at info and at debug afterwards, not at info every block. Logging only; not part
+// of the consensus state, and empty again after a restart.
+var endBlockLogState sync.Map // types.UUID -> string
+
+func logEndBlockStateOnce(app *common.App, id *types.UUID, state string, format string, args ...any) {
+	if app.Service == nil || app.Service.Logger == nil {
+		return
+	}
+	if prev, loaded := endBlockLogState.Swap(*id, state); loaded && prev.(string) == state {
+		app.Service.Logger.Debugf(format, args...)
+		return
+	}
+	app.Service.Logger.Infof(format, args...)
+}
+
 func genMerkleTreeForEpoch(ctx context.Context, app *common.App, epochID *types.UUID,
 	escrowAddr string, blockHash [32]byte) (leafNum int, jsonTree []byte, root []byte, total *big.Int, err error) {
-	// DEBUG: Log entry into genMerkleTreeForEpoch
 	if app.Service != nil && app.Service.Logger != nil {
-		app.Service.Logger.Infof("[MERKLE] genMerkleTreeForEpoch called with epoch ID=%s, escrow=%s", epochID, escrowAddr)
+		app.Service.Logger.Debugf("[MERKLE] genMerkleTreeForEpoch called with epoch ID=%s, escrow=%s", epochID, escrowAddr)
 	}
 
 	var rewards []*EpochReward
@@ -1889,14 +1898,13 @@ func genMerkleTreeForEpoch(ctx context.Context, app *common.App, epochID *types.
 		return 0, nil, nil, nil, err
 	}
 
-	// DEBUG: Log number of rewards collected
 	if app.Service != nil && app.Service.Logger != nil {
-		app.Service.Logger.Infof("[MERKLE] Collected %d rewards for epoch ID=%s", len(rewards), epochID)
+		app.Service.Logger.Debugf("[MERKLE] Collected %d rewards for epoch ID=%s", len(rewards), epochID)
 	}
 
 	if len(rewards) == 0 { // no rewards, delay finalize current epoch
 		if app.Service != nil && app.Service.Logger != nil {
-			app.Service.Logger.Warnf("[MERKLE] No rewards found for epoch ID=%s, returning 0", epochID)
+			app.Service.Logger.Debugf("[MERKLE] No rewards found for epoch ID=%s, returning 0", epochID)
 		}
 		return 0, nil, nil, nil, nil // should skip
 	}

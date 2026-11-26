@@ -120,7 +120,7 @@ func (ce *ConsensusEngine) proposeBlock(ctx context.Context) error {
 		return fmt.Errorf("error creating block proposal: %w", err)
 	}
 
-	ce.log.Info("Created block proposal", "height", blkProp.height, "hash", blkProp.blkHash)
+	ce.log.Debug("Created block proposal", "height", blkProp.height, "hash", blkProp.blkHash)
 
 	// Validate the block proposal before announcing it to the network
 	if err := ce.validateBlock(blkProp.blk); err != nil {
@@ -207,7 +207,7 @@ func (ce *ConsensusEngine) proposeBlock(ctx context.Context) error {
 	ce.processVotes(ctx)
 
 	if len(ce.validatorSet) > 1 { // or can check if the proposal is committed: ce.blkProp == nil
-		ce.log.Info("Waiting for votes from the validators", "height", blkProp.height, "hash", blkProp.blkHash)
+		ce.log.Debug("Waiting for votes from the validators", "height", blkProp.height, "hash", blkProp.blkHash)
 	}
 
 	return nil
@@ -384,11 +384,11 @@ func (ce *ConsensusEngine) addVote(ctx context.Context, voteMsg *vote, sender st
 		}
 
 		if voteInfo.AckStatus == ktypes.AckAgree {
-			ce.log.Info("Adding vote", "height", vote.Height, "blkHash", vote.BlkHash, "appHash", vote.AppHash, "sender", sender)
+			ce.log.Debug("Adding vote", "height", vote.Height, "blkHash", vote.BlkHash, "appHash", vote.AppHash, "sender", sender)
 		} else if voteInfo.AckStatus == ktypes.AckForked {
 			ce.log.Warn("Adding vote with apphash mismatch", "height", vote.Height, "blkHash", vote.BlkHash, "appHash", vote.AppHash, "sender", sender)
 		} else {
-			ce.log.Info("Adding nack vote", "height", vote.Height, "blkHash", vote.BlkHash, "sender", sender)
+			ce.log.Warn("Adding nack vote", "height", vote.Height, "blkHash", vote.BlkHash, "sender", sender)
 		}
 
 		ce.state.votes[sender] = voteInfo
@@ -527,6 +527,7 @@ func (ce *ConsensusEngine) processVotes(ctx context.Context) {
 	}
 
 	if ce.hasEnoughNacks(nacks) {
+		ce.log.Error("AppState updates: ", ce.stateHashFields()...)
 		haltReason := fmt.Sprintf("at least half the validators have rejected the block, preventing network progress. Halting the network: %d acks, %d nacks", acks, nacks)
 		ce.sendHalt(haltReason)
 		return

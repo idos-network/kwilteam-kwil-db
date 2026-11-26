@@ -286,7 +286,7 @@ func (ce *ConsensusEngine) processBlockProposal(ctx context.Context, blkPropMsg 
 	}
 
 	// Broadcast the result back to the leader
-	ce.log.Info("Sending ack to the leader", "height", blkPropMsg.height,
+	ce.log.Debug("Sending ack to the leader", "height", blkPropMsg.height,
 		"hash", blkPropMsg.blkHash, "appHash", ce.state.blockRes.appHash)
 
 	signature, err := ktypes.SignVote(blkPropMsg.blkHash, true, &ce.state.blockRes.appHash, ce.privKey)
@@ -366,6 +366,7 @@ func (ce *ConsensusEngine) commitBlock(ctx context.Context, blk *ktypes.Block, c
 	}
 
 	if ce.state.blockRes.appHash != ci.AppHash {
+		ce.log.Error("AppState updates: ", ce.stateHashFields()...)
 		haltR := fmt.Sprintf("Incorrect AppHash, halting the node. received: %s, computed: %s", ci.AppHash, ce.state.blockRes.appHash)
 		ce.sendHalt(haltR)
 		return nil
@@ -445,13 +446,7 @@ func (ce *ConsensusEngine) processAndCommit(ctx context.Context, blk *ktypes.Blo
 	// Commit the block if the appHash and commitInfo is valid
 	if ce.state.blockRes.appHash != ci.AppHash {
 		// dump the statehashes from the block processor for debugging
-		sh := ce.blockProcessor.StateHashes()
-		if syncing {
-			ce.log.Info("AppState updates: ",
-				"prevAppHash", sh.PrevApp[:8], "changesets", sh.Changeset[:8],
-				"validatorset", sh.ValUpdates[:8], "accounts", sh.Accounts[:8],
-				"txResults", sh.TxResults[:8], "params", sh.ParamUpdates[:8])
-		}
+		ce.log.Error("AppState updates: ", ce.stateHashFields()...)
 
 		haltR := fmt.Sprintf("processAndCommit: AppHash mismatch, halting the node. expected: %s, received: %s", ce.state.blockRes.appHash, ci.AppHash)
 		ce.sendHalt(haltR)

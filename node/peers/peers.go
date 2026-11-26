@@ -444,8 +444,13 @@ func (pm *PeerMan) startPex(ctx context.Context) {
 			go func() {
 				var count int
 				for peer := range peerChan {
+					// Discovery also returns this node. Its address would expire and be found
+					// again every round, each time with a failed "dial to self".
+					if peer.ID == pm.h.ID() {
+						continue
+					}
 					if pm.addPeerAddrs(peer) {
-						pm.log.Infof("Found new peer %v, connecting", peerIDStringer(peer.ID))
+						pm.log.Debugf("Found new peer %v, connecting", peerIDStringer(peer.ID))
 						// TODO: connection manager, with limits
 						if err = pm.c.Connect(ctx, peer); err != nil {
 							pm.log.Warnf("Failed to connect to %s: %v", peerIDStringer(peer.ID), CompressDialError(err))
@@ -934,7 +939,7 @@ func (pm *PeerMan) addPeer(pInfo PeerInfo, ttl time.Duration) bool {
 			continue // address already known
 		}
 		pm.ps.AddAddr(pInfo.ID, addr, ttl)
-		pm.log.Infof("Added new peer address to store: %v (%v) @ %v", nodeID, pInfo.ID, addr)
+		pm.log.Debugf("Added new peer address to store: %v (%v) @ %v", nodeID, pInfo.ID, addr)
 		addrCount++
 	}
 	for _, proto := range pInfo.Protos {

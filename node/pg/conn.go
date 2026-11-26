@@ -172,7 +172,7 @@ func NewPool(ctx context.Context, cfg *PoolConfig) (*Pool, error) {
 	defaultOnPgError := pCfg.ConnConfig.OnPgError
 	pCfg.ConnConfig.OnPgError = func(c *pgconn.PgConn, n *pgconn.PgError) bool {
 		level := log.LevelWarn
-		if strings.HasPrefix(n.SchemaName, "ds_") { // user query error
+		if isUserQueryError(n) {
 			level = log.LevelDebug
 		}
 		switch sev := strings.ToUpper(n.Severity); sev {
@@ -341,4 +341,18 @@ func subscribe(ctx context.Context, exec sql.Executor, subscribers *syncmap.Map[
 		_, err := exec.Execute(ctx2, "SELECT end_notices($1);", txid)
 		return err
 	}, nil
+}
+
+// isUserQueryError reports whether a Postgres error comes from what a transaction or call asked
+// for (bad data, a violated constraint, ERROR() raised in an action) rather than from the node.
+// The engine returns these to the caller (tx result, RPC error), and every node executing the
+// transaction would otherwise log the same error, with the row values in its detail.
+func isUserQueryError(n *pgconn.PgError) bool {
+	if strings.HasPrefix(n.SchemaName, "ds_") { // pre-0.10 namespaces
+		return true
+	}
+	// https://www.postgresql.org/docs/16/errcodes-appendix.html
+	return strings.HasPrefix(n.Code, "22") || // data exception
+		strings.HasPrefix(n.Code, "23") || // integrity constraint violation
+		n.Code == "P0001" // raise_exception
 }

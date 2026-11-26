@@ -312,7 +312,7 @@ func (n *Node) blkPropStreamHandler(s network.Stream) {
 		return
 	}
 
-	n.log.Info("got block proposal", "height", prop.Height, "hash", prop.Hash, "prevHash", prop.PrevHash,
+	n.log.Debug("got block proposal", "height", prop.Height, "hash", prop.Hash, "prevHash", prop.PrevHash,
 		"stamp", prop.Stamp, "leaderSig", prop.LeaderSig, "senderPubKey", hex.EncodeToString(prop.SenderPubKey))
 
 	from := s.Conn().RemotePeer()
@@ -405,7 +405,7 @@ func (n *Node) blkPropStreamHandler(s network.Stream) {
 		return
 	}
 
-	n.log.Info("processing block proposal", "height", height, "hash", hash,
+	n.log.Debug("processing block proposal", "height", height, "hash", hash,
 		"from", peers.PeerIDStringer(from))
 
 	ceProcessing = true // ce will call done now, neuter the defer

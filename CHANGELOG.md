@@ -26,6 +26,40 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
+### Changed
+
+- Log levels. A node logged about 58 000 lines a day at `info`, nearly all of
+  them repeated on every block, and warnings for normal states. Logging only;
+  block execution and the app hash don't change.
+  - Consensus logs `Committed Block` at `info` on every node. The leader also
+    logs `Starting a new consensus round` and the majority line with the ack and
+    nack counts. Block proposals, agreeing votes, acks and `Executed block` are
+    `debug`. A nack vote is now a warning (was `info`), like a vote with an
+    apphash mismatch.
+  - The state component hashes (`AppState updates`, a separate `info` line on
+    every block) are now part of `Committed Block`. A node that halts on an
+    apphash mismatch (follower on commit or catch-up, leader on too many nacks)
+    logs its own as an error first, so the two can be compared for the same
+    height.
+  - ERC-20 bridge `end_block`: the per-block trace (`[ENDBLOCK]`, `[MERKLE]`,
+    `[REWARDS]`) is `debug`. "No rewards in epoch yet, delaying finalization"
+    and "Previous epoch not confirmed yet" were logged every block, the first
+    as two warnings; each is now one `info` line when the state starts, then
+    `debug`. Finalizing an epoch stays `info`.
+  - Peer discovery no longer dials the node itself. Discovery returned the
+    node's own address every round, which logged "dial to self attempted" as a
+    warning about every two minutes. Re-adding known peer addresses is `debug`.
+  - Postgres errors caused by the transaction or call (classes 22 and 23,
+    `ERROR()` in an action) are `debug` instead of a warning on every node; the
+    error reaches the caller and `failed transaction` already logs it. The old
+    check only recognised pre-0.10 `ds_` namespaces.
+  - Snapshots: creating and serving chunks logs per chunk at `debug`. The
+    snapshot's own lines (`pg_dump successful`, `Chunk files created`, catalog
+    and metadata sent to a peer) stay `info`.
+  - A rejected `user.broadcast` logs `failed to broadcast tx` at `info` (was
+    `error`); the client gets the error. A response the client hung up on is
+    `debug`, one cut off by the RPC timeout a warning.
+
 ## 0.12.1 - 2026-11-25
 
 Telemetry only (`[telemetry] enable = true`, off by default). Block execution
