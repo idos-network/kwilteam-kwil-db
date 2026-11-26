@@ -53,7 +53,7 @@ import (
 //    until one of these nodes gets majority of the validators to commit the block.
 
 func (ce *ConsensusEngine) newBlockRound(ctx context.Context) {
-	ce.log.Info("Starting a new consensus round", "height", ce.lastCommitHeight()+1)
+	ce.log.Debug("Starting a new consensus round", "height", ce.lastCommitHeight()+1)
 
 	// Leader can optimize this idle timeout of proposeTimeout duration to propose a block
 	// if there are enough transactions available in the mempool to fill the block.
@@ -120,7 +120,7 @@ func (ce *ConsensusEngine) proposeBlock(ctx context.Context) error {
 		return fmt.Errorf("error creating block proposal: %w", err)
 	}
 
-	ce.log.Info("Created block proposal", "height", blkProp.height, "hash", blkProp.blkHash)
+	ce.log.Debug("Created block proposal", "height", blkProp.height, "hash", blkProp.blkHash)
 
 	// Validate the block proposal before announcing it to the network
 	if err := ce.validateBlock(blkProp.blk); err != nil {
@@ -207,7 +207,7 @@ func (ce *ConsensusEngine) proposeBlock(ctx context.Context) error {
 	ce.processVotes(ctx)
 
 	if len(ce.validatorSet) > 1 { // or can check if the proposal is committed: ce.blkProp == nil
-		ce.log.Info("Waiting for votes from the validators", "height", blkProp.height, "hash", blkProp.blkHash)
+		ce.log.Debug("Waiting for votes from the validators", "height", blkProp.height, "hash", blkProp.blkHash)
 	}
 
 	return nil
@@ -384,7 +384,7 @@ func (ce *ConsensusEngine) addVote(ctx context.Context, voteMsg *vote, sender st
 		}
 
 		if voteInfo.AckStatus == ktypes.AckAgree {
-			ce.log.Info("Adding vote", "height", vote.Height, "blkHash", vote.BlkHash, "appHash", vote.AppHash, "sender", sender)
+			ce.log.Debug("Adding vote", "height", vote.Height, "blkHash", vote.BlkHash, "appHash", vote.AppHash, "sender", sender)
 		} else if voteInfo.AckStatus == ktypes.AckForked {
 			ce.log.Warn("Adding vote with apphash mismatch", "height", vote.Height, "blkHash", vote.BlkHash, "appHash", vote.AppHash, "sender", sender)
 		} else {
@@ -537,7 +537,7 @@ func (ce *ConsensusEngine) processVotes(ctx context.Context) {
 		return
 	}
 
-	ce.log.Info("Majority of the validators have accepted the block, proceeding to commit the block",
+	ce.log.Debug("Majority of the validators have accepted the block, proceeding to commit the block",
 		"height", blkProp.blk.Header.Height, "hash", blkProp.blkHash, "acks", acks, "nacks", nacks)
 
 	slices.SortFunc(votes, func(a, b *ktypes.VoteInfo) int {

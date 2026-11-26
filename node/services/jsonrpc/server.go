@@ -689,7 +689,13 @@ func (s *Server) writeJSON(w http.ResponseWriter, thing any, code int) {
 	}
 	w.WriteHeader(code)
 	_, err = w.Write(b)
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, context.Canceled): // the client went away; nothing wrong with the node
+		s.log.Debugf("Write error: %v", err)
+	case errors.Is(err, http.ErrHandlerTimeout): // the timeout handler already answered 503
+		s.log.Warnf("Write error: %v", err)
+	default:
 		s.log.Errorf("Write error: %v", err)
 	}
 }

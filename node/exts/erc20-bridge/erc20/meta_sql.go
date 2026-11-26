@@ -541,9 +541,8 @@ func balanceOf(ctx context.Context, app *common.App, rewardID *types.UUID, user 
 
 // getRewardsForEpoch gets all rewards for an epoch.
 func getRewardsForEpoch(ctx context.Context, app *common.App, epochID *types.UUID, fn func(reward *EpochReward) error) error {
-	// DEBUG: Log which epoch we're querying rewards for
 	if app.Service != nil && app.Service.Logger != nil {
-		app.Service.Logger.Infof("[REWARDS] Querying epoch_rewards for epoch_id=%s", epochID)
+		app.Service.Logger.Debugf("[REWARDS] Querying epoch_rewards for epoch_id=%s", epochID)
 	}
 
 	rewardCount := 0
@@ -571,9 +570,8 @@ func getRewardsForEpoch(ctx context.Context, app *common.App, epochID *types.UUI
 		})
 	})
 
-	// DEBUG: Log how many rewards were found
 	if app.Service != nil && app.Service.Logger != nil {
-		app.Service.Logger.Infof("[REWARDS] Found %d rewards for epoch_id=%s", rewardCount, epochID)
+		app.Service.Logger.Debugf("[REWARDS] Found %d rewards for epoch_id=%s", rewardCount, epochID)
 	}
 	return err
 }

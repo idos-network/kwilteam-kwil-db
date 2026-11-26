@@ -671,7 +671,7 @@ func (bp *BlockProcessor) ExecuteBlock(ctx context.Context, req *ktypes.BlockExe
 	nextHash := bp.nextAppHash(sh)
 
 	if !syncing {
-		bp.log.Info("AppState updates: ",
+		bp.log.Debug("AppState updates: ",
 			"prevAppHash", sh.PrevApp[:8], "changesets", sh.Changeset[:8],
 			"validatorset", sh.ValUpdates[:8], "accounts", sh.Accounts[:8],
 			"txResults", sh.TxResults[:8], "params", sh.ParamUpdates[:8])

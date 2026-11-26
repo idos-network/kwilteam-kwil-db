@@ -286,7 +286,7 @@ func (ce *ConsensusEngine) processBlockProposal(ctx context.Context, blkPropMsg 
 	}
 
 	// Broadcast the result back to the leader
-	ce.log.Info("Sending ack to the leader", "height", blkPropMsg.height,
+	ce.log.Debug("Sending ack to the leader", "height", blkPropMsg.height,
 		"hash", blkPropMsg.blkHash, "appHash", ce.state.blockRes.appHash)
 
 	signature, err := ktypes.SignVote(blkPropMsg.blkHash, true, &ce.state.blockRes.appHash, ce.privKey)

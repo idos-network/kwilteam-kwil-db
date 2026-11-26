@@ -510,7 +510,9 @@ func (svc *Service) Broadcast(ctx context.Context, req *userjson.BroadcastReques
 	if err != nil {
 		errCode := types.BroadcastErrorToCode(err)
 		if errCode == types.CodeUnknownError {
-			svc.log.Error("failed to broadcast tx", "error", err)
+			// Mostly a transaction the node rejects (bad signature, payload that doesn't
+			// decode); the client gets the error back.
+			svc.log.Info("failed to broadcast tx", "error", err)
 		}
 
 		errData := &userjson.BroadcastError{

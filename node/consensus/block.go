@@ -344,7 +344,7 @@ func (ce *ConsensusEngine) executeBlock(ctx context.Context, blkProp *blockPropo
 	ce.catchupTicker.Reset(ce.catchupTimeout)
 
 	if !syncing { // ignore these logs during syncing
-		ce.log.Info("Executed block", "height", blkProp.height, "blockID", blkProp.blkHash, "appHash", results.AppHash.String(), "numTxs", blkProp.blk.Header.NumTxns, "duration", time.Since(now))
+		ce.log.Debug("Executed block", "height", blkProp.height, "blockID", blkProp.blkHash, "appHash", results.AppHash.String(), "numTxs", blkProp.blk.Header.NumTxns, "duration", time.Since(now))
 	}
 	return nil
 }

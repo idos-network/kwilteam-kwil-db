@@ -400,7 +400,7 @@ func (s *Snapshotter) splitStreamIntoChunks(ctx context.Context, height uint64, 
 		chunkIndex++
 
 		indexLogged := chunkIndex - 1
-		s.log.Info("Chunk created", "index", indexLogged, "chunkfile", chunkFileName, "size", written)
+		s.log.Debug("Chunk created", "index", indexLogged, "chunkfile", chunkFileName, "size", written)
 
 		if copyErr == io.EOF || copyErr == io.ErrUnexpectedEOF || written < ChunkSize {
 			break
