@@ -25,6 +25,7 @@ import (
 	"github.com/trufnetwork/kwil-db/extensions/resolutions"
 	"github.com/trufnetwork/kwil-db/node/accounts"
 	"github.com/trufnetwork/kwil-db/node/meta"
+	"github.com/trufnetwork/kwil-db/node/metrics"
 	"github.com/trufnetwork/kwil-db/node/types/sql"
 	"github.com/trufnetwork/kwil-db/node/voting"
 )
@@ -202,7 +203,11 @@ func (r *TxApp) Execute(ctx *common.TxContext, db sql.DB, tx *types.Transaction)
 	r.trackValidatorJoinApprovals(tx)
 
 	// track event count
-	return route.Execute(ctx, r, db, tx)
+	res = route.Execute(ctx, r, db, tx)
+	if res != nil {
+		metrics.Engine.RecordTx(context.Background(), tx.Body.PayloadType.String(), res.ResponseCode == types.CodeOk)
+	}
+	return res
 }
 
 // trackValidatorJoinApprovals tracks validator join approvals from this node.

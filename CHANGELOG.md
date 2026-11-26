@@ -26,6 +26,35 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
+### Added
+
+- Metrics (`[telemetry] enable = true`; `node/metrics/idos.go`). Recording them
+  doesn't change block execution or the app hash. Names below are the ones the
+  Vector config on the kwil nodes exports.
+  - `kwild_action_calls_total{kind, namespace, action, result}` and
+    `kwild_action_duration_milliseconds{kind, namespace, action}`: top-level
+    action calls. `kind` is `tx` (in a transaction, every node executes it),
+    `call` (read-only, `user.call`) or `internal` (an extension without a
+    transaction context). Only actions that exist are recorded, so action names
+    a client makes up don't become series; calls of those fail before the
+    lookup and show in the RPC metrics. A transaction with several argument
+    sets counts one call per set. The duration histogram has fewer buckets
+    (5 ms to 10 s) than the other latency histograms, since it has one per
+    action.
+  - `kwild_tx_executed_total{type, result}`: transactions executed in blocks,
+    by payload type.
+  - `kwild_mempool_txs`, `kwild_mempool_bytes`: mempool size.
+  - Go runtime of the kwild process from `runtime/metrics`:
+    `kwild_go_goroutines`, `kwild_go_memory_heap_objects_bytes`,
+    `kwild_go_memory_mapped_bytes`, `kwild_go_gc_heap_goal_bytes`,
+    `kwild_go_gc_cycles_total`.
+  - ERC-20 bridge, per instance (`bridge` ID, `chain`), at the end of every
+    block: `kwild_erc20_epoch_age_seconds` (block time since the current epoch
+    started) and `kwild_erc20_epoch_finalization_waiting{reason}`, 1 while an
+    epoch that is due can't be finalized because it has no rewards
+    (`no_rewards`) or the previous epoch isn't confirmed
+    (`previous_unconfirmed`).
+
 ### Changed
 
 - Log levels. A node logged about 58 000 lines a day at `info`, nearly all of

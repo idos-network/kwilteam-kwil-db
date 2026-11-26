@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/decred/dcrd/container/lru"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/trufnetwork/kwil-db/extensions/precompiles"
 	"github.com/trufnetwork/kwil-db/node/engine"
 	"github.com/trufnetwork/kwil-db/node/engine/parse"
+	"github.com/trufnetwork/kwil-db/node/metrics"
 	"github.com/trufnetwork/kwil-db/node/pg"
 	"github.com/trufnetwork/kwil-db/node/types/sql"
 )
@@ -659,6 +661,23 @@ func isValidVarName(s string) error {
 // Call executes an action against the database.
 // The resultFn is called with the result of the action, if any.
 func (i *baseInterpreter) call(ctx *common.EngineContext, db sql.DB, namespace, action string, args []any, resultFn func(*common.Row) error, toplevel bool) (callRes *common.CallResult, err error) {
+	// idOS fork: per-action metrics for top-level calls. Recorded only once the
+	// action is found, so names of actions that don't exist (client input) never
+	// become attribute values. Deferred first, so it runs after the panic
+	// recovery below and sees the final error.
+	var metricAction string
+	if toplevel {
+		start := time.Now()
+		defer func() {
+			if metricAction == "" {
+				return
+			}
+			ok := err == nil && (callRes == nil || callRes.Error == nil)
+			metrics.Engine.RecordActionCall(context.Background(), actionCallKind(ctx, db),
+				namespace, metricAction, ok, time.Since(start))
+		}()
+	}
+
 	copied := i.copy()
 	defer func() {
 		// if there is either an error or a panic, then we need
@@ -721,7 +740,7 @@ func (i *baseInterpreter) call(ctx *common.EngineContext, db sql.DB, namespace, 
 	case executableTypeFunction:
 		return nil, fmt.Errorf(`action "%s" is a built-in function and cannot be called directly`, action)
 	case executableTypeAction, executableTypePrecompile:
-		// do nothing, this is what we want
+		metricAction = action
 	default:
 		return nil, fmt.Errorf(`node bug: unknown executable type "%s"`, exec.Type)
 	}
@@ -775,6 +794,19 @@ func (i *baseInterpreter) call(ctx *common.EngineContext, db sql.DB, namespace, 
 	return &common.CallResult{
 		Logs: *execCtx.logs,
 	}, err
+}
+
+// actionCallKind is the kind attribute of the action metrics: "internal" for
+// extensions calling without a transaction context, "call" for read-only calls
+// (user.call), "tx" otherwise.
+func actionCallKind(ctx *common.EngineContext, db sql.DB) string {
+	if ctx != nil && ctx.InvalidTxCtx {
+		return "internal"
+	}
+	if am, ok := db.(sql.AccessModer); ok && am.AccessMode() == sql.ReadOnly {
+		return "call"
+	}
+	return "tx"
 }
 
 // rowToCommonRow converts a row to a common.Row.
