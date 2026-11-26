@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -24,8 +25,14 @@ func TestInstruments(t *testing.T) {
 		Engine.RecordActionCall(ctx, "call", "main", "get_wallets", true, time.Millisecond)
 		Engine.RecordTx(ctx, "execute", i%5 != 0)
 	}
-	Bridge.RecordEpoch(ctx, "b1", "arbitrum_one", time.Hour, EpochWaitingPreviousUnconfirmed)
-	Bridge.RecordEpoch(ctx, "b1", "arbitrum_one", 2*time.Hour, EpochWaitingNoRewards)
+	Bridge.SetEpochs([]EpochState{
+		{BridgeID: "b1", Chain: "arbitrum_one", Age: time.Hour, WaitingReason: EpochWaitingPreviousUnconfirmed},
+		{BridgeID: "b2", Chain: "arbitrum_one", Age: time.Minute},
+	})
+	// b2 disabled: only b1 is reported, with its new state.
+	Bridge.SetEpochs([]EpochState{
+		{BridgeID: "b1", Chain: "arbitrum_one", Age: 2 * time.Hour, WaitingReason: EpochWaitingNoRewards},
+	})
 	Mempool.SetSizeFunc(func() (int64, int64) { return 3, 1500 })
 
 	rm := collect(t, reader)
@@ -110,4 +117,27 @@ func actionCallCounts(t *testing.T, rm metricdata.ResourceMetrics) map[string]in
 func attr(s attribute.Set, key attribute.Key) string {
 	v, _ := s.Value(key)
 	return v.AsString()
+}
+
+func TestBoundedActionName(t *testing.T) {
+	actionNamesMu.Lock()
+	saved := actionNames
+	actionNames = map[[2]string]struct{}{}
+	actionNamesMu.Unlock()
+	t.Cleanup(func() {
+		actionNamesMu.Lock()
+		actionNames = saved
+		actionNamesMu.Unlock()
+	})
+
+	for i := range maxActionNames {
+		ns, action := boundedActionName("main", fmt.Sprintf("a%d", i))
+		require.Equal(t, fmt.Sprintf("a%d", i), action)
+		require.Equal(t, "main", ns)
+	}
+	ns, action := boundedActionName("main", "one_too_many")
+	require.Equal(t, [2]string{"other", "other"}, [2]string{ns, action})
+	// Names seen before the cap keep their own series.
+	ns, action = boundedActionName("main", "a7")
+	require.Equal(t, [2]string{"main", "a7"}, [2]string{ns, action})
 }

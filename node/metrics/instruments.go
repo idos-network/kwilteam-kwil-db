@@ -3,6 +3,8 @@ package metrics
 import (
 	"context"
 	"runtime/metrics"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -32,8 +34,7 @@ var (
 	actionCallsCounter  metric.Int64Counter
 	actionDurationHist  metric.Float64Histogram
 	txExecutedCounter   metric.Int64Counter
-	epochAgeGauge       metric.Float64Gauge
-	epochFinalizeGauge  metric.Int64Gauge
+	bridgeEpochs        atomic.Pointer[[]EpochState]
 	mempoolSizeFunc     atomic.Pointer[func() (txs, bytes int64)]
 	runtimeMetricSample = []metrics.Sample{
 		{Name: "/sched/goroutines:goroutines"},
@@ -56,10 +57,28 @@ func init() {
 		metric.WithDescription("Transactions executed in blocks by payload type and result"))
 
 	bridgeMeter := otel.Meter(ERC20BridgeMeterName)
-	epochAgeGauge, _ = bridgeMeter.Float64Gauge("erc20.epoch.age_seconds",
-		metric.WithDescription("Seconds since the current reward epoch started (block time)"), metric.WithUnit("s"))
-	epochFinalizeGauge, _ = bridgeMeter.Int64Gauge("erc20.epoch.finalization_waiting",
-		metric.WithDescription("1 while a due epoch is not finalized, by reason (no_rewards, previous_unconfirmed)"))
+	_, _ = bridgeMeter.Float64ObservableGauge("erc20.epoch.age_seconds",
+		metric.WithDescription("Seconds since the current reward epoch started (block time)"), metric.WithUnit("s"),
+		metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+			for _, e := range loadEpochs() {
+				o.Observe(e.Age.Seconds(), metric.WithAttributes(e.attrs()...))
+			}
+			return nil
+		}))
+	_, _ = bridgeMeter.Int64ObservableGauge("erc20.epoch.finalization_waiting",
+		metric.WithDescription("1 while a due epoch is not finalized, by reason (no_rewards, previous_unconfirmed)"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			for _, e := range loadEpochs() {
+				for _, reason := range []string{EpochWaitingNoRewards, EpochWaitingPreviousUnconfirmed} {
+					var v int64
+					if reason == e.WaitingReason {
+						v = 1
+					}
+					o.Observe(v, metric.WithAttributes(append(e.attrs(), attribute.String("reason", reason))...))
+				}
+			}
+			return nil
+		}))
 
 	mempoolMeter := otel.Meter(MempoolMeterName)
 	_, _ = mempoolMeter.Int64ObservableGauge("mempool.txs",
@@ -131,7 +150,34 @@ func result(ok bool) string {
 	return "error"
 }
 
+// maxActionNames caps the distinct namespace/action pairs recorded. Only actions
+// that exist are recorded, but the SDK keeps a series for the life of the
+// process, also after an action is dropped, so creating actions over and over
+// would otherwise grow the series without limit. Further pairs are recorded as
+// namespace and action "other".
+const maxActionNames = 1000
+
+var (
+	actionNamesMu sync.Mutex
+	actionNames   = map[[2]string]struct{}{}
+)
+
+func boundedActionName(namespace, action string) (string, string) {
+	key := [2]string{namespace, action}
+	actionNamesMu.Lock()
+	defer actionNamesMu.Unlock()
+	if _, ok := actionNames[key]; ok {
+		return namespace, action
+	}
+	if len(actionNames) >= maxActionNames {
+		return "other", "other"
+	}
+	actionNames[key] = struct{}{}
+	return namespace, action
+}
+
 func (engineMetrics) RecordActionCall(ctx context.Context, kind, namespace, action string, ok bool, duration time.Duration) {
+	namespace, action = boundedActionName(namespace, action)
 	attrs := []attribute.KeyValue{
 		attribute.String("kind", kind),
 		attribute.String("namespace", namespace),
@@ -148,15 +194,31 @@ func (engineMetrics) RecordTx(ctx context.Context, payloadType string, ok bool) 
 	))
 }
 
-// BridgeMetrics records the epoch state of ERC-20 bridge instances.
+// BridgeMetrics reports the epoch state of ERC-20 bridge instances.
 type BridgeMetrics interface {
-	// RecordEpoch records, for one bridge instance at the end of a block, the
-	// age of the current epoch and why a due epoch isn't finalized ("" when it
-	// isn't due or was just finalized).
-	RecordEpoch(ctx context.Context, bridgeID, chain string, age time.Duration, waitingReason string)
+	// SetEpochs replaces the reported state with that of the active instances
+	// at the end of a block. Instances not in the list (disabled, removed)
+	// are no longer exported.
+	SetEpochs(states []EpochState)
 }
 
-// Reasons a due epoch isn't finalized, for BridgeMetrics.RecordEpoch.
+// EpochState is the epoch state of one bridge instance at the end of a block.
+type EpochState struct {
+	BridgeID string
+	Chain    string
+	// Age is the block time since the current epoch started.
+	Age time.Duration
+	// WaitingReason is why an epoch that is due isn't finalized:
+	// EpochWaitingNoRewards, EpochWaitingPreviousUnconfirmed, or "" when it
+	// isn't due or was just finalized.
+	WaitingReason string
+}
+
+func (e EpochState) attrs() []attribute.KeyValue {
+	return []attribute.KeyValue{attribute.String("bridge", e.BridgeID), attribute.String("chain", e.Chain)}
+}
+
+// Reasons a due epoch isn't finalized, for EpochState.
 const (
 	EpochWaitingNoRewards           = "no_rewards"
 	EpochWaitingPreviousUnconfirmed = "previous_unconfirmed"
@@ -164,17 +226,16 @@ const (
 
 type bridgeMetrics struct{}
 
-func (bridgeMetrics) RecordEpoch(ctx context.Context, bridgeID, chain string, age time.Duration, waitingReason string) {
-	bridge := []attribute.KeyValue{attribute.String("bridge", bridgeID), attribute.String("chain", chain)}
-	epochAgeGauge.Record(ctx, age.Seconds(), metric.WithAttributes(bridge...))
-	// Both reasons on every block, so the one that no longer applies goes back to 0.
-	for _, reason := range []string{EpochWaitingNoRewards, EpochWaitingPreviousUnconfirmed} {
-		var v int64
-		if reason == waitingReason {
-			v = 1
-		}
-		epochFinalizeGauge.Record(ctx, v, metric.WithAttributes(append(bridge, attribute.String("reason", reason))...))
+func (bridgeMetrics) SetEpochs(states []EpochState) {
+	states = slices.Clone(states)
+	bridgeEpochs.Store(&states)
+}
+
+func loadEpochs() []EpochState {
+	if p := bridgeEpochs.Load(); p != nil {
+		return *p
 	}
+	return nil
 }
 
 // MempoolMetrics reports the mempool size.

@@ -176,10 +176,14 @@ func (r *TxApp) Begin(ctx context.Context, height int64) error {
 // This method must only be called from the consensus engine,
 // sequentially, when executing transactions in a block.
 func (r *TxApp) Execute(ctx *common.TxContext, db sql.DB, tx *types.Transaction) (res *TxResponse) {
+	var payloadType string // set once the payload type has a route; the metric's type attribute
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			r.service.Logger.Error("panic executing transaction", "panic", recovered, "stack", string(debug.Stack()))
 			res = txRes(nil, types.CodeUnknownError, "", fmt.Errorf("panic executing transaction: %v", recovered))
+		}
+		if payloadType != "" && res != nil {
+			metrics.Engine.RecordTx(context.Background(), payloadType, res.ResponseCode == types.CodeOk)
 		}
 	}()
 
@@ -197,17 +201,14 @@ func (r *TxApp) Execute(ctx *common.TxContext, db sql.DB, tx *types.Transaction)
 		return txRes(nil, types.CodeInvalidTxType, "", fmt.Errorf("%w: %s", types.ErrUnknownPayloadType, tx.Body.PayloadType.String()))
 	}
 
+	payloadType = tx.Body.PayloadType.String()
 	r.service.Logger.Debug("executing transaction", "tx", tx)
 
 	// no need to error out if we cannot track the validator join approval
 	r.trackValidatorJoinApprovals(tx)
 
 	// track event count
-	res = route.Execute(ctx, r, db, tx)
-	if res != nil {
-		metrics.Engine.RecordTx(context.Background(), tx.Body.PayloadType.String(), res.ResponseCode == types.CodeOk)
-	}
-	return res
+	return route.Execute(ctx, r, db, tx)
 }
 
 // trackValidatorJoinApprovals tracks validator join approvals from this node.

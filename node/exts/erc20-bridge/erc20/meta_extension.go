@@ -1720,6 +1720,7 @@ func init() {
 		// We make a map of new epochs that we will use to track
 		// which instances need to be updated. After we are done, we will update the singleton.
 		newEpochs := make(map[types.UUID]*PendingEpoch)
+		var epochStates []metrics.EpochState // reported once all instances are done
 
 		err := getSingleton().ForEachInstance(true, func(id *types.UUID, info *rewardExtensionInfo) error {
 			info.mu.RLock()
@@ -1734,8 +1735,8 @@ func init() {
 				if info.ChainInfo != nil {
 					chain = string(info.ChainInfo.Name)
 				}
-				metrics.Bridge.RecordEpoch(context.Background(), id.String(), chain,
-					time.Duration(age)*time.Second, waitingReason)
+				epochStates = append(epochStates, metrics.EpochState{BridgeID: id.String(), Chain: chain,
+					Age: time.Duration(age) * time.Second, WaitingReason: waitingReason})
 			}
 			if app.Service != nil && app.Service.Logger != nil {
 				app.Service.Logger.Debugf("[ENDBLOCK] Instance %s: currentEpoch ID=%s, startHeight=%d, startTime=%d, distributionPeriod=%d, elapsed=%d",
@@ -1853,6 +1854,7 @@ func init() {
 		if err != nil {
 			return err
 		}
+		metrics.Bridge.SetEpochs(epochStates)
 
 		// now that we are done with recursive calls, we can update the singleton
 		return getSingleton().ForEachInstance(false, func(id *types.UUID, info *rewardExtensionInfo) error {
