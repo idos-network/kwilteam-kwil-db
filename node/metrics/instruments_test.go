@@ -31,7 +31,6 @@ func TestInstruments(t *testing.T) {
 
 	sums := map[string][]metricdata.DataPoint[int64]{}
 	gaugesInt := map[string][]metricdata.DataPoint[int64]{}
-	gaugesFloat := map[string][]metricdata.DataPoint[float64]{}
 	hists := map[string][]metricdata.HistogramDataPoint[float64]{}
 	for _, sm := range rm.ScopeMetrics {
 		for _, m := range sm.Metrics {
@@ -40,8 +39,6 @@ func TestInstruments(t *testing.T) {
 				sums[m.Name] = append(sums[m.Name], d.DataPoints...)
 			case metricdata.Gauge[int64]:
 				gaugesInt[m.Name] = append(gaugesInt[m.Name], d.DataPoints...)
-			case metricdata.Gauge[float64]:
-				gaugesFloat[m.Name] = append(gaugesFloat[m.Name], d.DataPoints...)
 			case metricdata.Histogram[float64]:
 				hists[m.Name] = append(hists[m.Name], d.DataPoints...)
 			}
