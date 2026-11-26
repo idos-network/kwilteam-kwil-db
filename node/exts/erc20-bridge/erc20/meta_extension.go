@@ -48,6 +48,7 @@ import (
 	"github.com/trufnetwork/kwil-db/node/exts/erc20-bridge/utils"
 	evmsync "github.com/trufnetwork/kwil-db/node/exts/evm-sync"
 	"github.com/trufnetwork/kwil-db/node/exts/evm-sync/chains"
+	"github.com/trufnetwork/kwil-db/node/metrics"
 	"github.com/trufnetwork/kwil-db/node/types/sql"
 	"github.com/trufnetwork/kwil-db/node/utils/syncmap"
 )
@@ -1719,6 +1720,7 @@ func init() {
 		// We make a map of new epochs that we will use to track
 		// which instances need to be updated. After we are done, we will update the singleton.
 		newEpochs := make(map[types.UUID]*PendingEpoch)
+		var epochStates []metrics.EpochState // reported once all instances are done
 
 		err := getSingleton().ForEachInstance(true, func(id *types.UUID, info *rewardExtensionInfo) error {
 			info.mu.RLock()
@@ -1727,6 +1729,15 @@ func init() {
 				return nil // skip inactive (e.g. unused) instances
 			}
 			elapsedTime := block.Timestamp - info.currentEpoch.StartTime
+			// Epoch metrics, recorded below once the state of this block is known.
+			recordEpoch := func(age int64, waitingReason string) {
+				var chain string
+				if info.ChainInfo != nil {
+					chain = string(info.ChainInfo.Name)
+				}
+				epochStates = append(epochStates, metrics.EpochState{BridgeID: id.String(), Chain: chain,
+					Age: time.Duration(age) * time.Second, WaitingReason: waitingReason})
+			}
 			if app.Service != nil && app.Service.Logger != nil {
 				app.Service.Logger.Debugf("[ENDBLOCK] Instance %s: currentEpoch ID=%s, startHeight=%d, startTime=%d, distributionPeriod=%d, elapsed=%d",
 					id, info.currentEpoch.ID, info.currentEpoch.StartHeight, info.currentEpoch.StartTime, info.userProvidedData.DistributionPeriod, elapsedTime)
@@ -1737,6 +1748,7 @@ func init() {
 				if app.Service != nil && app.Service.Logger != nil {
 					app.Service.Logger.Debugf("[ENDBLOCK] Instance %s: Not ready to finalize (elapsed %d < period %d)", id, elapsedTime, info.userProvidedData.DistributionPeriod)
 				}
+				recordEpoch(elapsedTime, "")
 				return nil
 			}
 
@@ -1787,6 +1799,7 @@ func init() {
 					logEndBlockStateOnce(app, id, "no-rewards:"+info.currentEpoch.ID.String(),
 						"[ENDBLOCK] Instance %s: no rewards in epoch ID=%s yet, delaying finalization",
 						id, info.currentEpoch.ID)
+					recordEpoch(elapsedTime, metrics.EpochWaitingNoRewards)
 					return nil
 				}
 
@@ -1824,6 +1837,7 @@ func init() {
 				mtLRUCache.Put(b32Root, jsonBody)
 
 				newEpochs[*id] = newEpoch
+				recordEpoch(0, "") // the new epoch starts with this block
 				if app.Service != nil && app.Service.Logger != nil {
 					app.Service.Logger.Infof("[ENDBLOCK] Instance %s: Successfully finalized epoch and created new epoch", id)
 				}
@@ -1834,11 +1848,13 @@ func init() {
 			logEndBlockStateOnce(app, id, "unconfirmed:"+info.currentEpoch.ID.String(),
 				"[ENDBLOCK] Instance %s: Previous epoch not confirmed yet, skipping finalization (currentEpoch ID=%s)",
 				id, info.currentEpoch.ID)
+			recordEpoch(elapsedTime, metrics.EpochWaitingPreviousUnconfirmed)
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+		metrics.Bridge.SetEpochs(epochStates)
 
 		// now that we are done with recursive calls, we can update the singleton
 		return getSingleton().ForEachInstance(false, func(id *types.UUID, info *rewardExtensionInfo) error {

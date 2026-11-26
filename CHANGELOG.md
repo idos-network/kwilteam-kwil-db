@@ -26,6 +26,34 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
+### Added
+
+- Metrics (`[telemetry] enable = true`; `node/metrics/instruments.go`).
+  Recording them doesn't change block execution or the app hash. OpenTelemetry
+  instrument names:
+  - `action.calls{kind, namespace, action, result}` and
+    `action.duration{kind, namespace, action}` (ms): top-level action calls.
+    `kind` is `tx` (in a transaction, every node executes it), `call`
+    (read-only, `user.call`) or `internal` (an extension without a transaction
+    context). Only actions that exist are recorded, so action names a client
+    makes up don't become series; calls of those fail before the lookup and
+    show in the RPC metrics. After 1000 distinct namespace/action pairs,
+    further ones are recorded as `other`, since a series stays for the life of
+    the process even after its action is dropped. A transaction with several argument sets counts
+    one call per set. The duration histogram has fewer buckets (5 ms to 10 s)
+    than the other latency histograms, since it has one per action.
+  - `tx.executed{type, result}`: transactions executed in blocks, by payload
+    type, including ones that fail with a recovered panic.
+  - `mempool.txs`, `mempool.bytes`: mempool size.
+  - Go runtime of the process from `runtime/metrics`: `go.goroutines`,
+    `go.memory.heap_objects_bytes`, `go.memory.mapped_bytes`,
+    `go.gc.heap_goal_bytes`, `go.gc.cycles`.
+  - ERC-20 bridge, per active instance (`bridge` ID, `chain`), as of the end
+    of the last block; a disabled or removed instance is no longer reported: `erc20.epoch.age_seconds` (block time since the current epoch
+    started) and `erc20.epoch.finalization_waiting{reason}`, 1 while an epoch
+    that is due can't be finalized because it has no rewards (`no_rewards`) or
+    the previous epoch isn't confirmed (`previous_unconfirmed`).
+
 ### Changed
 
 - Log levels. A node logged about 58 000 lines a day at `info`, nearly all of

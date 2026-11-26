@@ -32,6 +32,7 @@ import (
 	"github.com/trufnetwork/kwil-db/node/listeners"
 	"github.com/trufnetwork/kwil-db/node/mempool"
 	"github.com/trufnetwork/kwil-db/node/meta"
+	"github.com/trufnetwork/kwil-db/node/metrics"
 	"github.com/trufnetwork/kwil-db/node/migrations"
 	"github.com/trufnetwork/kwil-db/node/pg"
 	rpcserver "github.com/trufnetwork/kwil-db/node/services/jsonrpc"
@@ -94,6 +95,10 @@ func buildServer(ctx context.Context, d *coreDependencies) *server {
 	// Mempool
 	txSz := min(d.cfg.Mempool.MaxTxBytes, d.genesisCfg.MaxBlockSize) // txSz shouldn't exceed MaxBlockSize
 	mp := mempool.New(d.cfg.Mempool.MaxSize, txSz)
+	metrics.Mempool.SetSizeFunc(func() (txs, bytes int64) {
+		sz, n := mp.Size()
+		return int64(n), int64(sz)
+	})
 
 	// TxAPP - pass same shared service directly without copying
 	txApp := buildTxApp(ctx, d, db, accounts, vs, e, sharedService)

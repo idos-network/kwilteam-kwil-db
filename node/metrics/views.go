@@ -7,7 +7,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric"
 )
 
-// idOS fork: the instruments in metrics.go record attributes such as the
+// The instruments in metrics.go record attributes such as the
 // block height, block size, latency and error text. Each new value is a new
 // attribute set that the SDK keeps for the life of the process (cumulative
 // temporality, no cardinality limit by default) and exports on every
@@ -21,18 +21,29 @@ import (
 var allowedAttributes = map[attribute.Key]struct{}{
 	"method":    {}, // JSON-RPC method, only registered methods are recorded
 	"status":    {}, // JSON-RPC error code
-	"type":      {}, // SQL command (SELECT, INSERT, ...), see sqlCommand
+	"type":      {}, // SQL command (SELECT, INSERT, ...), see sqlCommand; tx payload type
 	"proto":     {}, // p2p protocol id
 	"operation": {}, // blacklist add / remove
-	"reason":    {}, // blacklist reason, see blacklistReason
+	"reason":    {}, // blacklist reason, see blacklistReason; epoch waiting reason
 	"permanent": {}, // blacklist entry is permanent
 	"direction": {}, // inbound / outbound
+	// instruments.go
+	"kind":      {}, // action call kind: tx, call, internal
+	"namespace": {}, // namespace of an action that exists
+	"action":    {}, // action that exists (unknown names are not recorded)
+	"result":    {}, // ok / error
+	"bridge":    {}, // ERC-20 bridge instance ID
+	"chain":     {}, // EVM chain of a bridge instance
 }
 
 // latencyBucketsMS are the histogram bounds for the latency instruments, which
 // record milliseconds. The SDK default starts at 5 ms, but most SQL queries
 // take less than that.
 var latencyBucketsMS = []float64{0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000}
+
+// actionLatencyBucketsMS are fewer bounds for action.duration (instruments.go), which
+// has one histogram per action: each bound is a series per action.
+var actionLatencyBucketsMS = []float64{5, 25, 100, 500, 2500, 10000}
 
 func allowedAttribute(kv attribute.KeyValue) bool {
 	_, ok := allowedAttributes[kv.Key]
@@ -49,7 +60,11 @@ func boundedView(inst metric.Instrument) (metric.Stream, bool) {
 		AttributeFilter: allowedAttribute,
 	}
 	if inst.Kind == metric.InstrumentKindHistogram {
-		s.Aggregation = metric.AggregationExplicitBucketHistogram{Boundaries: latencyBucketsMS}
+		bounds := latencyBucketsMS
+		if inst.Name == "action.duration" {
+			bounds = actionLatencyBucketsMS
+		}
+		s.Aggregation = metric.AggregationExplicitBucketHistogram{Boundaries: bounds}
 	}
 	return s, true
 }
