@@ -53,7 +53,7 @@ import (
 //    until one of these nodes gets majority of the validators to commit the block.
 
 func (ce *ConsensusEngine) newBlockRound(ctx context.Context) {
-	ce.log.Debug("Starting a new consensus round", "height", ce.lastCommitHeight()+1)
+	ce.log.Info("Starting a new consensus round", "height", ce.lastCommitHeight()+1)
 
 	// Leader can optimize this idle timeout of proposeTimeout duration to propose a block
 	// if there are enough transactions available in the mempool to fill the block.
@@ -388,7 +388,7 @@ func (ce *ConsensusEngine) addVote(ctx context.Context, voteMsg *vote, sender st
 		} else if voteInfo.AckStatus == ktypes.AckForked {
 			ce.log.Warn("Adding vote with apphash mismatch", "height", vote.Height, "blkHash", vote.BlkHash, "appHash", vote.AppHash, "sender", sender)
 		} else {
-			ce.log.Info("Adding nack vote", "height", vote.Height, "blkHash", vote.BlkHash, "sender", sender)
+			ce.log.Warn("Adding nack vote", "height", vote.Height, "blkHash", vote.BlkHash, "sender", sender)
 		}
 
 		ce.state.votes[sender] = voteInfo
@@ -537,7 +537,7 @@ func (ce *ConsensusEngine) processVotes(ctx context.Context) {
 		return
 	}
 
-	ce.log.Debug("Majority of the validators have accepted the block, proceeding to commit the block",
+	ce.log.Info("Majority of the validators have accepted the block, proceeding to commit the block",
 		"height", blkProp.blk.Header.Height, "hash", blkProp.blkHash, "acks", acks, "nacks", nacks)
 
 	slices.SortFunc(votes, func(a, b *ktypes.VoteInfo) int {

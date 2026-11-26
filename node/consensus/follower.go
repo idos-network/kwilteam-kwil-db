@@ -444,14 +444,13 @@ func (ce *ConsensusEngine) processAndCommit(ctx context.Context, blk *ktypes.Blo
 
 	// Commit the block if the appHash and commitInfo is valid
 	if ce.state.blockRes.appHash != ci.AppHash {
-		// dump the statehashes from the block processor for debugging
+		// dump the statehashes from the block processor for debugging (the block processor
+		// logs them only at debug)
 		sh := ce.blockProcessor.StateHashes()
-		if syncing {
-			ce.log.Info("AppState updates: ",
-				"prevAppHash", sh.PrevApp[:8], "changesets", sh.Changeset[:8],
-				"validatorset", sh.ValUpdates[:8], "accounts", sh.Accounts[:8],
-				"txResults", sh.TxResults[:8], "params", sh.ParamUpdates[:8])
-		}
+		ce.log.Error("AppState updates: ",
+			"prevAppHash", sh.PrevApp[:8], "changesets", sh.Changeset[:8],
+			"validatorset", sh.ValUpdates[:8], "accounts", sh.Accounts[:8],
+			"txResults", sh.TxResults[:8], "params", sh.ParamUpdates[:8])
 
 		haltR := fmt.Sprintf("processAndCommit: AppHash mismatch, halting the node. expected: %s, received: %s", ce.state.blockRes.appHash, ci.AppHash)
 		ce.sendHalt(haltR)

@@ -31,9 +31,13 @@ version 0.10.1). Upstream history before that point isn't listed here.
 - Log levels. A node logged about 58 000 lines a day at `info`, nearly all of
   them repeated on every block, and warnings for normal states. Logging only;
   block execution and the app hash don't change.
-  - Consensus logs one `info` line per block, `Committed Block`. Block
-    proposals, votes, acks, rounds, `Executed block` and `AppState updates`
-    are `debug`. `Adding vote with apphash mismatch` stays a warning.
+  - Consensus logs `Committed Block` at `info` on every node. The leader also
+    logs `Starting a new consensus round` and the majority line with the ack and
+    nack counts. Block proposals, agreeing votes, acks, `Executed block` and
+    `AppState updates` are `debug`. A nack vote is now a warning (was `info`),
+    like a vote with an apphash mismatch. When a node halts on an apphash
+    mismatch it logs the component hashes as an error, also outside catch-up
+    (they were logged only at `info` on every block before).
   - ERC-20 bridge `end_block`: the per-block trace (`[ENDBLOCK]`, `[MERKLE]`,
     `[REWARDS]`) is `debug`. "No rewards in epoch yet, delaying finalization"
     and "Previous epoch not confirmed yet" were logged every block, the first
