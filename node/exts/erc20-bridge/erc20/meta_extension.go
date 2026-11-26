@@ -1728,7 +1728,7 @@ func init() {
 				return nil // skip inactive (e.g. unused) instances
 			}
 			elapsedTime := block.Timestamp - info.currentEpoch.StartTime
-			// idOS fork: epoch metrics, recorded below once the state of this block is known.
+			// Epoch metrics, recorded below once the state of this block is known.
 			recordEpoch := func(age int64, waitingReason string) {
 				var chain string
 				if info.ChainInfo != nil {

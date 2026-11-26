@@ -11,9 +11,9 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
-// TestIdosMetrics records through the idOS instruments (idos.go) and checks
+// TestInstruments records through the instruments in instruments.go and checks
 // their names, attribute sets and values as exported.
-func TestIdosMetrics(t *testing.T) {
+func TestInstruments(t *testing.T) {
 	reader := boundedViewReader()
 	ctx := context.Background()
 	// Cumulative across go test -count=N in one process; compare the increase.

@@ -661,7 +661,7 @@ func isValidVarName(s string) error {
 // Call executes an action against the database.
 // The resultFn is called with the result of the action, if any.
 func (i *baseInterpreter) call(ctx *common.EngineContext, db sql.DB, namespace, action string, args []any, resultFn func(*common.Row) error, toplevel bool) (callRes *common.CallResult, err error) {
-	// idOS fork: per-action metrics for top-level calls. Recorded only once the
+	// Per-action metrics for top-level calls. Recorded only once the
 	// action is found, so names of actions that don't exist (client input) never
 	// become attribute values. Deferred first, so it runs after the panic
 	// recovery below and sees the final error.

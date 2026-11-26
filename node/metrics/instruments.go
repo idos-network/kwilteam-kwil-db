@@ -11,19 +11,10 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// idOS fork: metrics upstream doesn't have. Per-action engine calls, executed
-// transactions by payload type, mempool size, Go runtime memory and the ERC-20
-// bridge epoch state. Every attribute has a bounded set of values (views.go).
-//
-// Names after the Vector transform on the kwil nodes (idos-kgw
-// vector/kwil-node.yaml): kwild_action_calls_total,
-// kwild_action_duration_milliseconds, kwild_tx_executed_total,
-// kwild_mempool_txs, kwild_mempool_bytes, kwild_go_goroutines,
-// kwild_go_memory_heap_objects_bytes, kwild_go_memory_mapped_bytes,
-// kwild_go_gc_heap_goal_bytes, kwild_go_gc_cycles_total,
-// kwild_erc20_epoch_age_seconds, kwild_erc20_epoch_finalization_waiting.
-// The transform drops a trailing _total or _count from every name, so gauges
-// must not end in one.
+// Per-action engine calls, executed transactions by payload type, mempool
+// size, Go runtime memory and the ERC-20 bridge epoch state. Every attribute
+// has a bounded set of values (views.go). Gauge names don't end in "total" or
+// "count", which Prometheus naming reserves for counters.
 
 var (
 	Engine  EngineMetrics  = engineMetrics{}

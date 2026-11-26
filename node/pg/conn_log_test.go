@@ -12,7 +12,7 @@ func TestIsUserQueryError(t *testing.T) {
 		want         bool
 	}{
 		{"23505", "main", true},  // unique_violation
-		{"23514", "idos", true},  // check_violation
+		{"23514", "app", true},   // check_violation
 		{"22P02", "main", true},  // invalid_text_representation
 		{"P0001", "main", true},  // ERROR() in an action
 		{"42P01", "ds_x", true},  // any error in a pre-0.10 namespace

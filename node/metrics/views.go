@@ -7,7 +7,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric"
 )
 
-// idOS fork: the instruments in metrics.go record attributes such as the
+// The instruments in metrics.go record attributes such as the
 // block height, block size, latency and error text. Each new value is a new
 // attribute set that the SDK keeps for the life of the process (cumulative
 // temporality, no cardinality limit by default) and exports on every
@@ -27,7 +27,7 @@ var allowedAttributes = map[attribute.Key]struct{}{
 	"reason":    {}, // blacklist reason, see blacklistReason; epoch waiting reason
 	"permanent": {}, // blacklist entry is permanent
 	"direction": {}, // inbound / outbound
-	// idos.go
+	// instruments.go
 	"kind":      {}, // action call kind: tx, call, internal
 	"namespace": {}, // namespace of an action that exists
 	"action":    {}, // action that exists (unknown names are not recorded)
@@ -41,7 +41,7 @@ var allowedAttributes = map[attribute.Key]struct{}{
 // take less than that.
 var latencyBucketsMS = []float64{0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000}
 
-// actionLatencyBucketsMS are fewer bounds for action.duration (idos.go), which
+// actionLatencyBucketsMS are fewer bounds for action.duration (instruments.go), which
 // has one histogram per action: each bound is a series per action.
 var actionLatencyBucketsMS = []float64{5, 25, 100, 500, 2500, 10000}
 
