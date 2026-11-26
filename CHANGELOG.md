@@ -26,6 +26,11 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
+## 0.12.2 - 2026-11-26
+
+Logging and telemetry. Block execution and the app hash don't change, so
+validators can upgrade one at a time.
+
 ### Added
 
 - Metrics (`[telemetry] enable = true`; `node/metrics/instruments.go`).
@@ -52,7 +57,7 @@ version 0.10.1). Upstream history before that point isn't listed here.
     of the last block; a disabled or removed instance is no longer reported: `erc20.epoch.age_seconds` (block time since the current epoch
     started) and `erc20.epoch.finalization_waiting{reason}`, 1 while an epoch
     that is due can't be finalized because it has no rewards (`no_rewards`) or
-    the previous epoch isn't confirmed (`previous_unconfirmed`).
+    the previous epoch isn't confirmed (`previous_unconfirmed`). (#52)
 
 ### Changed
 
@@ -86,7 +91,7 @@ version 0.10.1). Upstream history before that point isn't listed here.
     and metadata sent to a peer) stay `info`.
   - A rejected `user.broadcast` logs `failed to broadcast tx` at `info` (was
     `error`); the client gets the error. A response the client hung up on is
-    `debug`, one cut off by the RPC timeout a warning.
+    `debug`, one cut off by the RPC timeout a warning. (#51)
 
 ## 0.12.1 - 2026-11-25
 
