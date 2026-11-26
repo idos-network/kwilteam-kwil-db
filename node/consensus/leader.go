@@ -527,6 +527,7 @@ func (ce *ConsensusEngine) processVotes(ctx context.Context) {
 	}
 
 	if ce.hasEnoughNacks(nacks) {
+		ce.log.Error("AppState updates: ", ce.stateHashFields()...)
 		haltReason := fmt.Sprintf("at least half the validators have rejected the block, preventing network progress. Halting the network: %d acks, %d nacks", acks, nacks)
 		ce.sendHalt(haltReason)
 		return

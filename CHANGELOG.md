@@ -33,11 +33,14 @@ version 0.10.1). Upstream history before that point isn't listed here.
   block execution and the app hash don't change.
   - Consensus logs `Committed Block` at `info` on every node. The leader also
     logs `Starting a new consensus round` and the majority line with the ack and
-    nack counts. Block proposals, agreeing votes, acks, `Executed block` and
-    `AppState updates` are `debug`. A nack vote is now a warning (was `info`),
-    like a vote with an apphash mismatch. When a node halts on an apphash
-    mismatch it logs the component hashes as an error, also outside catch-up
-    (they were logged only at `info` on every block before).
+    nack counts. Block proposals, agreeing votes, acks and `Executed block` are
+    `debug`. A nack vote is now a warning (was `info`), like a vote with an
+    apphash mismatch.
+  - The state component hashes (`AppState updates`, a separate `info` line on
+    every block) are now part of `Committed Block`. A node that halts on an
+    apphash mismatch (follower on commit or catch-up, leader on too many nacks)
+    logs its own as an error first, so the two can be compared for the same
+    height.
   - ERC-20 bridge `end_block`: the per-block trace (`[ENDBLOCK]`, `[MERKLE]`,
     `[REWARDS]`) is `debug`. "No rewards in epoch yet, delaying finalization"
     and "Previous epoch not confirmed yet" were logged every block, the first

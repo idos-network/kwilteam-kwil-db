@@ -438,8 +438,10 @@ func (ce *ConsensusEngine) commit(ctx context.Context, syncing bool) (err error)
 	}
 
 	if !syncing {
-		ce.log.Info("Committed Block", "height", height, "hash", blkProp.blkHash.String(),
-			"appHash", appHash.String(), "numTxs", blkProp.blk.Header.NumTxns)
+		// With the state hashes, so that after an apphash mismatch the halted node's dump can
+		// be compared with the other nodes' lines for the same height.
+		ce.log.Info("Committed Block", append([]any{"height", height, "hash", blkProp.blkHash.String(),
+			"appHash", appHash.String(), "numTxs", blkProp.blk.Header.NumTxns}, ce.stateHashFields()...)...)
 	}
 
 	// update and reset the state fields
@@ -506,4 +508,20 @@ func (ce *ConsensusEngine) resetState() {
 	ce.blkExecCancelFn = nil
 	ce.longRunningTxs = make([]ktypes.Hash, 0)
 	ce.cancelFnMtx.Unlock()
+}
+
+// stateHashFields returns the component hashes of the last executed block (first 8 bytes of
+// each) as log key-value pairs. On an apphash mismatch, comparing them across nodes shows which
+// part of the state diverged.
+func (ce *ConsensusEngine) stateHashFields() []any {
+	if ce.blockProcessor == nil { // some unit tests build the engine without one
+		return nil
+	}
+	sh := ce.blockProcessor.StateHashes()
+	if sh == nil {
+		return nil
+	}
+	return []any{"prevAppHash", sh.PrevApp[:8], "changesets", sh.Changeset[:8],
+		"validatorset", sh.ValUpdates[:8], "accounts", sh.Accounts[:8],
+		"txResults", sh.TxResults[:8], "params", sh.ParamUpdates[:8]}
 }
