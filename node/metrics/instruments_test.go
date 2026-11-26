@@ -25,14 +25,6 @@ func TestInstruments(t *testing.T) {
 		Engine.RecordActionCall(ctx, "call", "main", "get_wallets", true, time.Millisecond)
 		Engine.RecordTx(ctx, "execute", i%5 != 0)
 	}
-	Bridge.SetEpochs([]EpochState{
-		{BridgeID: "b1", Chain: "arbitrum_one", Age: time.Hour, WaitingReason: EpochWaitingPreviousUnconfirmed},
-		{BridgeID: "b2", Chain: "arbitrum_one", Age: time.Minute},
-	})
-	// b2 disabled: only b1 is reported, with its new state.
-	Bridge.SetEpochs([]EpochState{
-		{BridgeID: "b1", Chain: "arbitrum_one", Age: 2 * time.Hour, WaitingReason: EpochWaitingNoRewards},
-	})
 	Mempool.SetSizeFunc(func() (int64, int64) { return 3, 1500 })
 
 	rm := collect(t, reader)
@@ -70,17 +62,6 @@ func TestInstruments(t *testing.T) {
 
 	require.Len(t, sums["tx.executed"], 2)
 
-	// The reason that no longer applies is back at 0.
-	waiting := map[string]int64{}
-	for _, dp := range gaugesInt["erc20.epoch.finalization_waiting"] {
-		require.Equal(t, "b1", attr(dp.Attributes, "bridge"))
-		require.Equal(t, "arbitrum_one", attr(dp.Attributes, "chain"))
-		waiting[attr(dp.Attributes, "reason")] = dp.Value
-	}
-	require.Equal(t, map[string]int64{EpochWaitingNoRewards: 1, EpochWaitingPreviousUnconfirmed: 0}, waiting)
-	require.Len(t, gaugesFloat["erc20.epoch.age_seconds"], 1)
-	require.Equal(t, 7200.0, gaugesFloat["erc20.epoch.age_seconds"][0].Value)
-
 	require.Equal(t, int64(3), gaugesInt["mempool.txs"][0].Value)
 	require.Equal(t, int64(1500), gaugesInt["mempool.bytes"][0].Value)
 
@@ -89,6 +70,62 @@ func TestInstruments(t *testing.T) {
 	require.Positive(t, gaugesInt["go.memory.heap_objects_bytes"][0].Value)
 	require.Positive(t, gaugesInt["go.gc.heap_goal_bytes"][0].Value)
 	require.Len(t, sums["go.gc.cycles"], 1)
+}
+
+// TestBridgeEpochs checks that the epoch gauges follow the latest snapshot: a
+// reason that no longer applies goes back to 0, and an instance that is no
+// longer in the snapshot (disabled) is no longer exported.
+func TestBridgeEpochs(t *testing.T) {
+	reader := boundedViewReader()
+	t.Cleanup(func() { Bridge.SetEpochs(nil) })
+
+	Bridge.SetEpochs([]EpochState{
+		{BridgeID: "b1", Chain: "arbitrum_one", Age: time.Hour, WaitingReason: EpochWaitingPreviousUnconfirmed},
+		{BridgeID: "b2", Chain: "arbitrum_one", Age: time.Minute},
+	})
+	ages, waiting := epochPoints(collect(t, reader))
+	require.Equal(t, map[string]float64{"b1": 3600, "b2": 60}, ages)
+	require.Equal(t, map[string]int64{
+		"b1/" + EpochWaitingNoRewards: 0, "b1/" + EpochWaitingPreviousUnconfirmed: 1,
+		"b2/" + EpochWaitingNoRewards: 0, "b2/" + EpochWaitingPreviousUnconfirmed: 0,
+	}, waiting)
+
+	// b2 disabled, b1 now waits for rewards.
+	Bridge.SetEpochs([]EpochState{
+		{BridgeID: "b1", Chain: "arbitrum_one", Age: 2 * time.Hour, WaitingReason: EpochWaitingNoRewards},
+	})
+	ages, waiting = epochPoints(collect(t, reader))
+	require.Equal(t, map[string]float64{"b1": 7200}, ages)
+	require.Equal(t, map[string]int64{
+		"b1/" + EpochWaitingNoRewards: 1, "b1/" + EpochWaitingPreviousUnconfirmed: 0,
+	}, waiting)
+
+	Bridge.SetEpochs(nil)
+	ages, waiting = epochPoints(collect(t, reader))
+	require.Empty(t, ages)
+	require.Empty(t, waiting)
+}
+
+// epochPoints returns the exported epoch age by bridge and waiting value by
+// bridge/reason.
+func epochPoints(rm metricdata.ResourceMetrics) (map[string]float64, map[string]int64) {
+	ages := map[string]float64{}
+	waiting := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			switch m.Name {
+			case "erc20.epoch.age_seconds":
+				for _, dp := range m.Data.(metricdata.Gauge[float64]).DataPoints {
+					ages[attr(dp.Attributes, "bridge")] = dp.Value
+				}
+			case "erc20.epoch.finalization_waiting":
+				for _, dp := range m.Data.(metricdata.Gauge[int64]).DataPoints {
+					waiting[attr(dp.Attributes, "bridge")+"/"+attr(dp.Attributes, "reason")] = dp.Value
+				}
+			}
+		}
+	}
+	return ages, waiting
 }
 
 func collect(t *testing.T, reader *sdkmetric.ManualReader) metricdata.ResourceMetrics {
