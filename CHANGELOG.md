@@ -10,8 +10,7 @@ version 0.10.1). Upstream history before that point isn't listed here.
   (`kwilVersion`) and tagged on the merge commit in `main`:
   - `vX.Y.Z` for the root module (`github.com/trufnetwork/kwil-db`)
   - `core/vX.Y.Z` for the core module (`github.com/trufnetwork/kwil-db/core`)
-- Tags exist only so Go can resolve them. They aren't GitHub releases. Publishing
-  a GitHub release would trigger `release.yaml`, so don't publish one.
+- Tags exist only so Go can resolve them. There are no GitHub releases.
 - `idos-kgw/idos-kwild/go.mod` consumes the modules through `replace`:
 
   ```
