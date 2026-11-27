@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+# Keep the organization's UI settings (review profile, tools, ...) and change only the keys below.
+inheritance: true
+
+language: en
+
+chat:
+  auto_reply: true
+
+reviews:
+  # Review budget: every PR open, push, "Update branch", force-push and `@coderabbitai review`
+  # costs one review attempt for the PR author, and more than ~40 attempts in 7 days cuts the
+  # hourly allowance from 8 to 1-2. So: review when the PR opens, then only on request.
+  auto_review:
+    enabled: true
+    # Drafts are skipped; marking a PR ready for review triggers one review.
+    drafts: false
+    # Pushes after the first review are not reviewed on their own.
+    # Comment `@coderabbitai review` once a round of fixes is pushed.
+    auto_incremental_review: false
+    # Release PRs ("Bump version to x.y.z"). For any other trivial PR, put
+    # `@coderabbitai ignore` in the description.
+    ignore_title_keywords:
+      - "WIP"
+      - "Bump"
+      - "no-review"
+    labels:
+      - "!no-review"
+
+  path_filters:
+    - "!**/go.sum"
+    - "!node/engine/parse/gen/**" # ANTLR-generated Kuneiform parser
+    - "!node/exts/erc20-bridge/abigen/**" # abigen-generated contract bindings
+
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        This is idOS's fork of kwil-db (upstream: trufnetwork/kwil-db; Go module path unchanged).
+        It runs the idOS validator network. Keep the diff against upstream small: prefer
+        targeted changes over refactors, and expect a short comment where fork behavior differs.
+        Most changes here are hardening against hostile peers and transactions, so judge every
+        change by what a malicious peer, client or validator can make the node do.
+
+    - path: "node/{consensus,block_processor,txapp,engine,accounts,voting,exts,migrations,snapshotter}/**/*.go"
+      instructions: |
+        Consensus-critical code: every validator must compute the same result.
+        - Flag non-determinism: wall-clock time, randomness, map iteration order, floats,
+          goroutine races, error text or ordering that can differ between nodes
+        - A node replaying existing blocks must reach the same apphash. Behavior changes for
+          transactions already on chain need an activation height or a network migration;
+          call out any change that would halt or fork a catching-up node
+        - Invalid input from a transaction is rejected with a deterministic error, never a
+          panic or an aborted block
+        - Signatures, authenticator types and nonces are verified before state changes
+
+    - path: "node/{*.go,peers/**,mempool/**,services/**,statesync*.go,snapshotter/**}"
+      instructions: |
+        Network-facing code: peers, RPC clients and snapshot providers are untrusted.
+        - Every length, count and size read from the wire is bounded before allocation
+        - Reads and downloads have timeouts; one slow peer cannot hold a shared slot
+        - Data from peers (blocks, snapshot chunks, NACKs, anchors) is verified before use
+        - Mempool admission rejects what block execution would reject, cheaply
+
+    - path: "node/metrics/**/*.go"
+      instructions: |
+        Metrics: attribute sets must be bounded (no tx hashes, addresses or free-form action
+        input as labels); recording must not allocate or block on the hot path.
+
+    - path: "**/*_test.go"
+      instructions: |
+        Tests should cover the hostile case the change defends against, not only the happy path.
+        Postgres-backed tests must clean up and not depend on run order.
+
+    - path: "CHANGELOG.md"
+      instructions: |
+        Entries describe operator-visible changes and say if a release is consensus-breaking or
+        needs a coordinated upgrade.
