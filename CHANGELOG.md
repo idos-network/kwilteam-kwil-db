@@ -26,6 +26,29 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
+## 0.12.3 - 2026-11-27
+
+Request traces. Block execution and the app hash don't change, so validators
+can upgrade one at a time.
+
+### Added
+
+- Traces (#54), exported with the metrics (`[telemetry] enable = true`) over
+  OTLP. Spans are recorded only under a request, so block execution and
+  background jobs record nothing:
+  - JSON-RPC server span per request to a registered method on the user RPC
+    server (not the admin server). It continues the caller's W3C `traceparent`;
+    the error code is recorded, the message isn't. A panicking handler ends
+    the span as `-32603`.
+  - `action <namespace>.<action>` span per top-level action call, with
+    `kwil.call.kind`, `kwil.namespace`, `kwil.action` and `kwil.result`.
+  - `pg <COMMAND>` span per SQL statement (pgx query tracer), with the command,
+    returned rows and SQLSTATE on failure. No SQL text, arguments or error
+    messages.
+- The tracer provider samples by the parent (`ParentBased(AlwaysSample)`) and
+  uses the W3C trace-context propagator.
+- CORS on the RPC server allows the `Traceparent` and `Tracestate` headers.
+
 ## 0.12.2 - 2026-11-26
 
 Logging and telemetry. Block execution and the app hash don't change, so
