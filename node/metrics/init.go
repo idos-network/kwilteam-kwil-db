@@ -99,7 +99,9 @@ func StartOTEL(ctx context.Context, options ...OTELOption) (func(context.Context
 	)
 	shutdownFuncs = append(shutdownFuncs, tracerProvider.Shutdown)
 
-	otel.SetTracerProvider(tracerProvider) // for use with otel.Tracer()
+	// Only the node's own spans (tracing.go), not the global provider: libp2p's
+	// DHT traces through otel.Tracer and would send its peer lookups as traces.
+	SetTracerProvider(tracerProvider)
 
 	// Set up meter exporter.
 	metricExporter, err := otlpmetrichttp.New(context.Background(),

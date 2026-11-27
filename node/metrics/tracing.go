@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -10,10 +11,13 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
-// Spans for requests served by the node. StartOTEL sets the tracer provider and
-// the W3C trace-context propagator; without them every span here is a no-op.
+// Spans for requests served by the node. StartOTEL sets the node's tracer
+// provider (SetTracerProvider) and the W3C trace-context propagator; without
+// them every span here is a no-op. The provider is not the global one, so
+// libraries that trace through otel.Tracer (libp2p's DHT) record nothing.
 //
 // Only the server span of a request may start a trace. The other spans are
 // started only under an existing span, so work without a request (block
@@ -23,9 +27,21 @@ import (
 
 const tracerName = "github.com/trufnetwork/kwil-db/node"
 
-// Tracer returns the node's tracer from the current global provider.
+type tracerProviderHolder struct{ trace.TracerProvider }
+
+var nodeTracerProvider atomic.Value // tracerProviderHolder
+
+// SetTracerProvider sets the provider of the node's spans; nil turns them off.
+func SetTracerProvider(tp trace.TracerProvider) {
+	nodeTracerProvider.Store(tracerProviderHolder{tp})
+}
+
+// Tracer returns the node's tracer.
 func Tracer() trace.Tracer {
-	return otel.GetTracerProvider().Tracer(tracerName)
+	if h, _ := nodeTracerProvider.Load().(tracerProviderHolder); h.TracerProvider != nil {
+		return h.Tracer(tracerName)
+	}
+	return noop.NewTracerProvider().Tracer(tracerName)
 }
 
 // ExtractTraceContext returns ctx with the remote span context from the

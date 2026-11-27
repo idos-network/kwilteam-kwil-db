@@ -19,15 +19,16 @@ import (
 
 	"github.com/trufnetwork/kwil-db/core/log"
 	jsonrpc "github.com/trufnetwork/kwil-db/core/rpc/json"
+	"github.com/trufnetwork/kwil-db/node/metrics"
 )
 
 func TestServerSpans(t *testing.T) {
 	rec := tracetest.NewSpanRecorder()
-	prevTP, prevProp := otel.GetTracerProvider(), otel.GetTextMapPropagator()
-	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	prevProp := otel.GetTextMapPropagator()
+	metrics.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() {
-		otel.SetTracerProvider(prevTP)
+		metrics.SetTracerProvider(nil)
 		otel.SetTextMapPropagator(prevProp)
 	})
 
