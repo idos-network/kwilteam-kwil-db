@@ -403,7 +403,7 @@ func jsonRPCTimeoutHandler(h http.Handler, timeout time.Duration, logger log.Log
 // NOTE: if this server is served behind KGW, those headers will be stripped.
 func corsHandler(h http.Handler) http.Handler {
 	allowMethods := "GET, POST, OPTIONS"
-	allowHeaders := "Accept, Content-Type, Content-Length, Accept-Encoding, Authorization, ResponseType, Range"
+	allowHeaders := "Accept, Content-Type, Content-Length, Accept-Encoding, Authorization, ResponseType, Range, Traceparent, Tracestate"
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))

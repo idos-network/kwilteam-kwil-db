@@ -45,11 +45,15 @@ func TestServerSpans(t *testing.T) {
 				handlerSpan = trace.SpanContextFromContext(ctx)
 				return nil, jsonrpc.NewError(jsonrpc.ErrorNoQueryWithPrivateRPC, "secret detail", nil)
 			}))
+		srv.RegisterMethodHandler("user.panic",
+			MakeMethodHandler(func(context.Context, *any) (*json.RawMessage, *jsonrpc.Error) {
+				panic("secret detail")
+			}))
 		return srv, &handlerSpan
 	}
 	post := func(srv *Server, body string) {
 		r := httptest.NewRequest(http.MethodPost, pathRPCV1, strings.NewReader(body))
-		r.Header.Set("traceparent", "00-"+traceID+"-"+spanID+"-01")
+		r.Header.Set("Traceparent", "00-"+traceID+"-"+spanID+"-01")
 		srv.srv.Handler.ServeHTTP(httptest.NewRecorder(), r)
 	}
 
@@ -71,6 +75,18 @@ func TestServerSpans(t *testing.T) {
 		for _, a := range s.Attributes() {
 			assert.NotContains(t, a.Value.Emit(), "secret")
 		}
+	})
+
+	t.Run("panicking handler", func(t *testing.T) {
+		rec.Reset()
+		srv, _ := newServer(t, WithTracing())
+		post(srv, `{"jsonrpc":"2.0","id":1,"method":"user.panic"}`)
+
+		spans := rec.Ended()
+		require.Len(t, spans, 1)
+		assert.Equal(t, codes.Error, spans[0].Status().Code)
+		assert.Empty(t, spans[0].Status().Description)
+		assert.Empty(t, spans[0].Events(), "panic value not recorded")
 	})
 
 	t.Run("unknown method", func(t *testing.T) {

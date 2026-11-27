@@ -148,6 +148,13 @@ func (s *Server) handleMethod(ctx context.Context, method jsonrpc.Method, params
 		var span trace.Span
 		ctx, span = metrics.StartRPCSpan(ctx, string(method))
 		defer func() {
+			if r := recover(); r != nil {
+				// A failed request without the panic value; the recovery
+				// middleware still gets the panic, with the original frames
+				// on the stack.
+				metrics.EndRPCSpan(span, int(jsonrpc.ErrorInternal))
+				panic(r)
+			}
 			code := 0
 			if rpcErr != nil {
 				code = int(rpcErr.Code)

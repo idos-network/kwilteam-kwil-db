@@ -82,7 +82,7 @@ func Test_options(t *testing.T) {
 
 	wantCorsHeaders := http.Header{
 		"Access-Control-Allow-Credentials": {"true"},
-		"Access-Control-Allow-Headers":     {strings.Join([]string{"Accept", "Content-Type", "Content-Length", "Accept-Encoding", "Authorization", "ResponseType", "Range"}, ", ")},
+		"Access-Control-Allow-Headers":     {strings.Join([]string{"Accept", "Content-Type", "Content-Length", "Accept-Encoding", "Authorization", "ResponseType", "Range", "Traceparent", "Tracestate"}, ", ")},
 		"Access-Control-Allow-Methods":     {strings.Join([]string{http.MethodGet, http.MethodPost, http.MethodOptions}, ", ")},
 		"Access-Control-Allow-Origin":      {testOrigin},
 	}

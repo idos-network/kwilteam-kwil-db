@@ -51,7 +51,7 @@ func TestRPCSpanContinuesTraceparent(t *testing.T) {
 	rec := recordSpans(t)
 
 	h := http.Header{}
-	h.Set("traceparent", "00-"+testTraceID+"-"+testParentSpan+"-01")
+	h.Set("Traceparent", "00-"+testTraceID+"-"+testParentSpan+"-01")
 	ctx := ExtractTraceContext(context.Background(), h)
 	_, span := StartRPCSpan(ctx, "user.call")
 	EndRPCSpan(span, -32001)
@@ -85,7 +85,7 @@ func TestRPCSpanFollowsUnsampledCaller(t *testing.T) {
 	rec := recordSpans(t)
 
 	h := http.Header{}
-	h.Set("traceparent", "00-"+testTraceID+"-"+testParentSpan+"-00")
+	h.Set("Traceparent", "00-"+testTraceID+"-"+testParentSpan+"-00")
 	_, span := StartRPCSpan(ExtractTraceContext(context.Background(), h), "user.call")
 	EndRPCSpan(span, 0)
 
