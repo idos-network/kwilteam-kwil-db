@@ -8,7 +8,10 @@ import (
 	"reflect"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	jsonrpc "github.com/trufnetwork/kwil-db/core/rpc/json"
+	"github.com/trufnetwork/kwil-db/node/metrics"
 	"github.com/trufnetwork/kwil-db/node/services/jsonrpc/openrpc"
 )
 
@@ -134,10 +137,23 @@ func (s *Server) RegisterMethodHandler(method jsonrpc.Method, h MethodHandler) {
 
 // handleMethod unmarshals into the appropriate params struct, and dispatches to
 // the TxSvc method handler.
-func (s *Server) handleMethod(ctx context.Context, method jsonrpc.Method, params json.RawMessage) (any, *jsonrpc.Error) {
+func (s *Server) handleMethod(ctx context.Context, method jsonrpc.Method, params json.RawMessage) (_ any, rpcErr *jsonrpc.Error) {
 	maker, have := s.methodHandlers[method]
 	if !have {
 		return nil, jsonrpc.NewError(jsonrpc.ErrorUnknownMethod, "unknown method", nil)
+	}
+
+	// A span only for registered methods: the name is never client input.
+	if s.tracing {
+		var span trace.Span
+		ctx, span = metrics.StartRPCSpan(ctx, string(method))
+		defer func() {
+			code := 0
+			if rpcErr != nil {
+				code = int(rpcErr.Code)
+			}
+			metrics.EndRPCSpan(span, code)
+		}()
 	}
 
 	argsPtr, handler := maker(ctx, s)

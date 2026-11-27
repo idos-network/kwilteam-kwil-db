@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -77,9 +78,9 @@ func StartOTEL(ctx context.Context, options ...OTELOption) (func(context.Context
 		return errors.Join(inErr, shutdown(ctx))
 	}
 
-	// Set up propagator.
-	// prop := newPropagator()
-	// otel.SetTextMapPropagator(prop)
+	// Set up propagator: W3C trace context only (KGW sends traceparent), no
+	// baggage.
+	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	// Set up trace provider.
 	traceExporter, err := otlptracehttp.New(context.Background(),
@@ -92,6 +93,8 @@ func StartOTEL(ctx context.Context, options ...OTELOption) (func(context.Context
 	}
 	tracerProvider := trace.NewTracerProvider(
 		trace.WithResource(res),
+		// Follow the caller's sampling decision; sample requests without one.
+		trace.WithSampler(trace.ParentBased(trace.AlwaysSample())),
 		trace.WithBatcher(traceExporter, trace.WithBatchTimeout(opts.interval)),
 	)
 	shutdownFuncs = append(shutdownFuncs, tracerProvider.Shutdown)
@@ -129,13 +132,6 @@ func StartOTEL(ctx context.Context, options ...OTELOption) (func(context.Context
 
 	return shutdown, nil
 }
-
-// func newPropagator() propagation.TextMapPropagator {
-// 	return propagation.NewCompositeTextMapPropagator(
-// 		propagation.TraceContext{},
-// 		propagation.Baggage{},
-// 	)
-// }
 
 // func newLoggerProvider() (*log.LoggerProvider, error) {
 // 	logExporter, err := stdoutlog.New()

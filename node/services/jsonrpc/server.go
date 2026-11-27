@@ -61,6 +61,7 @@ type Server struct {
 	spec           json.RawMessage
 	authSHA        []byte
 	tlsCfg         *tls.Config
+	tracing        bool
 }
 
 type serverConfig struct {
@@ -72,6 +73,7 @@ type serverConfig struct {
 	specInfo   *openrpc.Info
 	reqSzLimit int
 	proxyCount int
+	tracing    bool
 }
 
 type Opt func(*serverConfig)
@@ -132,6 +134,14 @@ func WithTimeout(timeout time.Duration) Opt {
 
 // WithCORS adds CORS headers to response so browser will permit cross origin
 // RPC requests.
+// WithTracing records a span per request to a registered method (see
+// node/metrics/tracing.go), continuing the caller's traceparent.
+func WithTracing() Opt {
+	return func(c *serverConfig) {
+		c.tracing = true
+	}
+}
+
 func WithCORS() Opt {
 	return func(c *serverConfig) {
 		c.enableCORS = true
@@ -252,6 +262,7 @@ func NewServer(addr string, log log.Logger, opts ...Opt) (*Server, error) {
 		services:       make(map[string]Svc),
 		specInfo:       cfg.specInfo,
 		tlsCfg:         cfg.tlsConfig,
+		tracing:        cfg.tracing,
 	}
 
 	if cfg.pass != "" {
@@ -648,7 +659,11 @@ func (s *Server) handlerJSONRPCV1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.processJSONRPCRequest(r.Context(), w, req)
+	ctx := r.Context()
+	if s.tracing {
+		ctx = metrics.ExtractTraceContext(ctx, r.Header)
+	}
+	s.processJSONRPCRequest(ctx, w, req)
 }
 
 // processJSONRPCRequest handles the jsonrpc.Request with handleRequest to call the

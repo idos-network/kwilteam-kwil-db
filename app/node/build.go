@@ -145,7 +145,8 @@ func buildServer(ctx context.Context, d *coreDependencies) *server {
 	jsonRPCServer, err := rpcserver.NewServer(d.cfg.RPC.ListenAddress,
 		rpcServerLogger, rpcserver.WithTimeout(time.Duration(d.cfg.RPC.Timeout)),
 		rpcserver.WithReqSizeLimit(d.cfg.RPC.MaxReqSize),
-		rpcserver.WithCORS(), rpcserver.WithServerInfo(&usersvc.SpecInfo))
+		rpcserver.WithCORS(), rpcserver.WithServerInfo(&usersvc.SpecInfo),
+		rpcserver.WithTracing())
 	if err != nil {
 		failBuild(err, "unable to create json-rpc server")
 	}
