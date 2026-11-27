@@ -169,6 +169,7 @@ func NewPool(ctx context.Context, cfg *PoolConfig) (*Pool, error) {
 			logger.Logf(level, "%v [%v]: %v / %v", n.Severity, n.Code, n.Message, n.Detail)
 		}
 	}
+	pCfg.ConnConfig.Tracer = queryTracer{} // spans under a request span only, see tracing.go
 	defaultOnPgError := pCfg.ConnConfig.OnPgError
 	pCfg.ConnConfig.OnPgError = func(c *pgconn.PgConn, n *pgconn.PgError) bool {
 		level := log.LevelWarn

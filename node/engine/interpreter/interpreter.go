@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/decred/dcrd/container/lru"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/trufnetwork/kwil-db/common"
 	"github.com/trufnetwork/kwil-db/core/types"
@@ -665,16 +666,28 @@ func (i *baseInterpreter) call(ctx *common.EngineContext, db sql.DB, namespace, 
 	// action is found, so names of actions that don't exist (client input) never
 	// become attribute values. Deferred first, so it runs after the panic
 	// recovery below and sees the final error.
+	// The span of a call made by a request (see node/metrics/tracing.go) ends
+	// here too; while it runs, the transaction context carries it so that the
+	// SQL statements become its children.
 	var metricAction string
+	var start time.Time
+	var span trace.Span
+	var reqCtx context.Context
 	if toplevel {
-		start := time.Now()
+		start = time.Now()
 		defer func() {
+			if span != nil {
+				ctx.TxContext.Ctx = reqCtx
+			}
 			if metricAction == "" {
 				return
 			}
 			ok := err == nil && (callRes == nil || callRes.Error == nil)
 			metrics.Engine.RecordActionCall(context.Background(), actionCallKind(ctx, db),
 				namespace, metricAction, ok, time.Since(start))
+			if span != nil {
+				metrics.EndActionSpan(span, ok)
+			}
 		}()
 	}
 
@@ -741,6 +754,12 @@ func (i *baseInterpreter) call(ctx *common.EngineContext, db sql.DB, namespace, 
 		return nil, fmt.Errorf(`action "%s" is a built-in function and cannot be called directly`, action)
 	case executableTypeAction, executableTypePrecompile:
 		metricAction = action
+		if toplevel && ctx.TxContext != nil {
+			if spanCtx, s, ok := metrics.StartActionSpan(ctx.TxContext.Ctx, actionCallKind(ctx, db), namespace, action, start); ok {
+				reqCtx, span = ctx.TxContext.Ctx, s
+				ctx.TxContext.Ctx = spanCtx
+			}
+		}
 	default:
 		return nil, fmt.Errorf(`node bug: unknown executable type "%s"`, exec.Type)
 	}
