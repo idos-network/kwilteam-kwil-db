@@ -24,11 +24,11 @@ func recordSpans(t *testing.T) *tracetest.SpanRecorder {
 	rec := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec),
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())))
-	prevTP, prevProp := otel.GetTracerProvider(), otel.GetTextMapPropagator()
-	otel.SetTracerProvider(tp)
+	prevProp := otel.GetTextMapPropagator()
+	SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() {
-		otel.SetTracerProvider(prevTP)
+		SetTracerProvider(nil)
 		otel.SetTextMapPropagator(prevProp)
 	})
 	return rec
@@ -120,4 +120,14 @@ func TestActionSpan(t *testing.T) {
 	assert.ElementsMatch(t, []string{"kwil.call.kind", "kwil.namespace", "kwil.action", "kwil.result"}, attrKeys(act.Attributes()))
 	assert.Equal(t, codes.Error, act.Status().Code)
 	assert.Empty(t, act.Status().Description)
+}
+
+// Libraries tracing through the global provider (libp2p's DHT) record nothing.
+func TestGlobalProviderUntouched(t *testing.T) {
+	rec := recordSpans(t)
+
+	_, span := otel.Tracer("go-libp2p-kad-dht").Start(context.Background(), "KademliaDHT.IpfsDHT.GetClosestPeers")
+	span.End()
+	assert.False(t, span.SpanContext().IsValid())
+	assert.Empty(t, rec.Started())
 }

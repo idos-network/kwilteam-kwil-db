@@ -25,6 +25,19 @@ version 0.10.1). Upstream history before that point isn't listed here.
 
 ## Unreleased
 
+## 0.12.4 - 2026-11-27
+
+Block execution and the app hash don't change, so validators can upgrade one at
+a time.
+
+### Fixed
+
+- Traces: the node's tracer provider is no longer the global OpenTelemetry one.
+  With it global, libp2p's DHT (which traces through `otel.Tracer`) sent its
+  periodic peer lookups as traces, with peer IDs and addresses, about four
+  times as many spans as the requests. Only the spans of `node/metrics`
+  (`metrics.Tracer`, set by `metrics.SetTracerProvider`) are recorded now.
+
 ## 0.12.3 - 2026-11-27
 
 Request traces. Block execution and the app hash don't change, so validators

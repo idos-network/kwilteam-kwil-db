@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -22,9 +21,8 @@ import (
 // nothing is recorded.
 func Test_ActionSpans(t *testing.T) {
 	rec := tracetest.NewSpanRecorder()
-	prev := otel.GetTracerProvider()
-	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
-	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+	metrics.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	t.Cleanup(func() { metrics.SetTracerProvider(nil) })
 
 	db := newTestDB(t, nil, nil)
 	ctx := context.Background()
